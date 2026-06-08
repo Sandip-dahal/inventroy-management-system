@@ -33,18 +33,18 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
- const login = async (email, password) => {
-  try {
-    const response = await authAPI.login(email, password);
-    localStorage.setItem('token', response.token);
-    setCurrentUser(response.data.user);
-    console.log('Logged in user:', response.data.user); // Add this
-    return response;
-  } catch (error) {
-    console.error('Login error:', error);
-    throw error;
-  }
-};
+  const login = async (email, password) => {
+    try {
+      const response = await authAPI.login(email, password);
+      localStorage.setItem('token', response.token);
+      setCurrentUser(response.data.user);
+      console.log('Logged in user:', response.data.user);
+      return response;
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
+  };
 
   const signup = async (userData) => {
     try {
