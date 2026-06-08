@@ -30,8 +30,8 @@ const defaultSettings = {
   qrCodeData: ''
 };
 
-// API base URL
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://progress-tracker-backend-s2u6.onrender.com/api';
+// API base URL - FIXED to correct backend
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://pos-backend-v2-rlxt.onrender.com/api';
 
 // Utility functions for handling settings
 export const getShopSettings = async () => {
@@ -54,7 +54,7 @@ export const getShopSettings = async () => {
     }
     
     console.log('Attempting to fetch settings from API...');
-    const response = await fetch(`${API_BASE_URL}/api/settings`, {
+    const response = await fetch(`${API_BASE_URL}/settings`, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
@@ -117,7 +117,7 @@ export const saveShopSettings = async (settings) => {
         apiSettings.qrCodeImage = apiSettings.qrCodeImage.split(',')[1];
       }
       
-      const response = await fetch(`${API_BASE_URL}/api/settings`, {
+      const response = await fetch(`${API_BASE_URL}/settings`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -169,7 +169,7 @@ export const saveQRCode = async (qrCodeImage, qrCodeContent, qrCodeImageType = '
       imageData = qrCodeImage.split(',')[1];
     }
     
-    const response = await fetch(`${API_BASE_URL}/api/settings/qr-code`, {
+    const response = await fetch(`${API_BASE_URL}/settings/qr-code`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -213,7 +213,7 @@ export const generateQRCodeFromShopInfo = async () => {
       throw new Error('Authentication required');
     }
     
-    const response = await fetch(`${API_BASE_URL}/api/settings/generate-qr`, {
+    const response = await fetch(`${API_BASE_URL}/settings/generate-qr`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -248,7 +248,7 @@ export const getQRCodeImageUrl = () => {
   const token = localStorage.getItem('token');
   if (!token) return null;
   
-  return `${API_BASE_URL}/api/settings/qr-code/image?t=${Date.now()}`;
+  return `${API_BASE_URL}/settings/qr-code/image?t=${Date.now()}`;
 };
 
 // Helper function to ensure QR code is properly formatted
