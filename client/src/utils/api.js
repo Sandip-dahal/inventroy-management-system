@@ -1,10 +1,11 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5002/api';
+// Change this line
+const API_URL = 'https://pos-backend-v2-rlxt.onrender.com/api';
 
 const api = axios.create({ 
   baseURL: API_URL,
-  timeout: 10000,
+  timeout: 30000, // Increased timeout
   headers: {
     'Content-Type': 'application/json'
   }
@@ -77,7 +78,7 @@ export const purchaseOrderAPI = {
   deletePurchaseOrder: (id) => api.delete(`/purchase-orders/${id}`).then(res => res.data),
 };
 
-// Transaction API methods - FIXED: Use api instance instead of axios directly
+// Transaction API methods
 export const transactionAPI = {
   getTransactions: (params) => api.get('/transactions', { params }).then(res => res.data),
   getTransaction: (id) => api.get(`/transactions/${id}`).then(res => res.data),
