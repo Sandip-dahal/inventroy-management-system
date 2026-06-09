@@ -28,18 +28,20 @@ api.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
-// Response interceptor for error handling
+// Response interceptor for error handling - FIXED VERSION
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      const requestUrl = error.config?.url || '';
-      // Only clear session when the token itself is invalid, not when a single API route fails
-      if (requestUrl.includes('/auth/me')) {
-        localStorage.removeItem('token');
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
+      // Clear ALL auth data for ANY 401 response
+      localStorage.removeItem('token');
+      localStorage.removeItem('shopSettings');
+      localStorage.removeItem('heldBills');
+      
+      // Only redirect if not already on public pages
+      const publicPaths = ['/login', '/signup', '/forgotpassword'];
+      if (!publicPaths.includes(window.location.pathname)) {
+        window.location.href = '/login';
       }
     }
     return Promise.reject({
@@ -678,7 +680,6 @@ export const staffAPI = {
       });
   },
 
-
   deleteStaff: (id) => {
     clearCache(`/staff/${id}`);
     clearCache('/staff');
@@ -794,7 +795,6 @@ export const payrollAPI = {
       .then(res => res.data)
       .catch(error => {
         console.error('Error generating payroll:', error);
-        // Enhanced error handling for duplicate detection
         if (error.response?.data?.message?.includes('already exists')) {
           throw new Error(`Payroll already exists for this staff member in the selected month/year.`);
         }
@@ -828,7 +828,6 @@ export const payrollAPI = {
       .then(res => res.data)
       .catch(error => {
         console.error('Error checking payroll existence:', error);
-        // If check fails, assume it doesn't exist to allow the main process to handle it
         return { exists: false, payroll: null };
       });
   }

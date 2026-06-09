@@ -15,11 +15,34 @@ export const AuthProvider = ({ children }) => {
     // Check if user is logged in on app load
     const token = localStorage.getItem('token');
     if (token) {
-      fetchCurrentUser();
+      validateTokenAndFetchUser();
     } else {
       setLoading(false);
     }
   }, []);
+
+  // New function to validate token before fetching user
+  const validateTokenAndFetchUser = async () => {
+    try {
+      const response = await authAPI.getMe();
+      setCurrentUser(response.data.user);
+    } catch (error) {
+      console.error('Invalid or expired token:', error);
+      // Clear invalid token and all related data
+      localStorage.removeItem('token');
+      localStorage.removeItem('shopSettings');
+      localStorage.removeItem('heldBills');
+      setCurrentUser(null);
+      
+      // Redirect to login if not already there
+      const publicPaths = ['/login', '/signup', '/forgotpassword'];
+      if (!publicPaths.includes(window.location.pathname)) {
+        window.location.href = '/login';
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchCurrentUser = async () => {
     try {
@@ -28,8 +51,9 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error('Error fetching current user:', error);
       localStorage.removeItem('token');
-    } finally {
-      setLoading(false);
+      localStorage.removeItem('shopSettings');
+      localStorage.removeItem('heldBills');
+      setCurrentUser(null);
     }
   };
 
@@ -57,11 +81,14 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // FIXED logout function - clears everything and redirects
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('shopSettings');
     localStorage.removeItem('heldBills');
     setCurrentUser(null);
+    // Redirect to login page
+    window.location.href = '/login';
   };
 
   const value = {
