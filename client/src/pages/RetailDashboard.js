@@ -17,6 +17,7 @@ import {
   Filler,
 } from 'chart.js';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 // Register ChartJS components
 ChartJS.register(
@@ -33,6 +34,8 @@ ChartJS.register(
 );
 
 const RetailDashboard = () => {
+  const { currentUser } = useAuth();
+
   // State for dashboard data
   const [dashboardData, setDashboardData] = useState({
     salesOverview: {
@@ -609,14 +612,16 @@ const RetailDashboard = () => {
       console.error('Error fetching dashboard data:', error);
       setIsLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
+
     fetchDashboardData();
     updateNepalTime();
     const timeInterval = setInterval(updateNepalTime, 60000); // Update every minute
     return () => clearInterval(timeInterval);
-  }, [fetchDashboardData]);
+  }, [fetchDashboardData, currentUser]);
 
   const todayIndex = new Date().getDay();
   const displayedDays = dashboardData.salesOverview.daysOfWeek;
