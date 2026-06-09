@@ -1,37 +1,17 @@
 const jwt = require('jsonwebtoken');
-const { db, isAdminSdk } = require('../firebase');
+const { db } = require('../firebase');
 
 const findUserById = async (id) => {
-  if (isAdminSdk) {
-    const userDoc = await db.collection('users').doc(id).get();
-    if (userDoc.exists) {
-      return { id: userDoc.id, ...userDoc.data() };
-    }
+  const userDoc = await db.collection('users').doc(id).get();
 
-    const snapshot = await db.collection('users').where('_id', '==', id).limit(1).get();
-    if (!snapshot.empty) {
-      const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() };
-    }
-
-    return null;
-  }
-
-  const { doc, collection, query, where, limit, getDoc, getDocs } = require('firebase/firestore');
-  const userRef = doc(db, 'users', id);
-  const userDoc = await getDoc(userRef);
-
-  if (userDoc.exists()) {
+  if (userDoc.exists) {
     return { id: userDoc.id, ...userDoc.data() };
   }
 
-  const usersRef = collection(db, 'users');
-  const q = query(usersRef, where('_id', '==', id), limit(1));
-  const snapshot = await getDocs(q);
-
+  const snapshot = await db.collection('users').where('_id', '==', id).limit(1).get();
   if (!snapshot.empty) {
-    const docSnap = snapshot.docs[0];
-    return { id: docSnap.id, ...docSnap.data() };
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() };
   }
 
   return null;
@@ -75,6 +55,11 @@ const auth = async (req, res, next) => {
       currentUser = await findUserById(decoded.id);
     } catch (dbError) {
       console.error('Firestore error in auth middleware:', dbError);
+      return res.status(500).json({
+        success: false,
+        message: 'Database error during authentication',
+        error: dbError.message,
+      });
     }
 
     if (!currentUser) {

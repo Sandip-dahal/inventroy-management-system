@@ -1,4 +1,5 @@
-const { db } = require('../firebase');
+const { clientDb, db } = require('../firebase');
+const firestoreDb = clientDb || db;
 const {
   collection,
   doc,
@@ -343,7 +344,7 @@ function createModel(collectionName, options = {}) {
       delete payload.id;
 
       if (this._isNew) {
-        const ref = await addDoc(collection(db, collectionName), payload);
+        const ref = await addDoc(collection(firestoreDb, collectionName), payload);
         this._id = ref.id;
         this.id = ref.id;
         this._isNew = false;
@@ -352,7 +353,7 @@ function createModel(collectionName, options = {}) {
         return this;
       }
 
-      await updateDoc(doc(db, collectionName, this._id), payload);
+      await updateDoc(doc(firestoreDb, collectionName, this._id), payload);
       this._original = this.toObject();
       this._modifiedPaths.clear();
       return this;
@@ -393,7 +394,7 @@ function createModel(collectionName, options = {}) {
   };
 
   Model._fetchAll = async function _fetchAll() {
-    const snapshot = await getDocs(collection(db, collectionName));
+    const snapshot = await getDocs(collection(firestoreDb, collectionName));
     return snapshot.docs.map((snap) => docFromSnapshot(snap, Model));
   };
 
@@ -428,7 +429,7 @@ function createModel(collectionName, options = {}) {
 
     let docs;
     if (constraints.length > 0) {
-      const q = query(collection(db, collectionName), ...constraints);
+      const q = query(collection(firestoreDb, collectionName), ...constraints);
       const snapshot = await getDocs(q);
       docs = snapshot.docs.map((snap) => docFromSnapshot(snap, Model));
     } else {
@@ -508,18 +509,18 @@ function createModel(collectionName, options = {}) {
     delete payload.id;
 
     if (opts.upsert && !existing) {
-      const ref = await addDoc(collection(db, collectionName), payload);
+      const ref = await addDoc(collection(firestoreDb, collectionName), payload);
       return Model.hydrate({ ...payload, _id: ref.id, id: ref.id });
     }
 
-    await setDoc(doc(db, collectionName, id), payload, { merge: true });
+    await setDoc(doc(firestoreDb, collectionName, id), payload, { merge: true });
     const result = Model.hydrate({ ...payload, _id: id, id });
     return opts.new === false ? existing : result;
   };
 
   Model.findByIdAndUpdate = async function findByIdAndUpdate(id, update, opts = {}) {
     const docId = normalizeId(id);
-    const snap = await getDoc(doc(db, collectionName, docId));
+    const snap = await getDoc(doc(firestoreDb, collectionName, docId));
     if (!snap.exists()) return null;
 
     if (update.$inc) {
@@ -527,8 +528,8 @@ function createModel(collectionName, options = {}) {
       Object.entries(update.$inc).forEach(([key, value]) => {
         incPayload[key] = value;
       });
-      await updateDoc(doc(db, collectionName, docId), incPayload);
-      const refreshed = await getDoc(doc(db, collectionName, docId));
+      await updateDoc(doc(firestoreDb, collectionName, docId), incPayload);
+      const refreshed = await getDoc(doc(firestoreDb, collectionName, docId));
       const result = docFromSnapshot(refreshed, Model);
       return opts.new === false ? docFromSnapshot(snap, Model) : result;
     }
@@ -540,7 +541,7 @@ function createModel(collectionName, options = {}) {
     const docs = await Model._fetchWithSimpleFilters(filter);
     const existing = docs[0];
     if (!existing) return null;
-    await deleteDoc(doc(db, collectionName, existing._id));
+    await deleteDoc(doc(firestoreDb, collectionName, existing._id));
     return existing;
   };
 
@@ -549,11 +550,11 @@ function createModel(collectionName, options = {}) {
   };
 
   Model.insertMany = async function insertMany(items = []) {
-    const batch = writeBatch(db);
+    const batch = writeBatch(firestoreDb);
     const created = [];
 
     items.forEach((item) => {
-      const ref = doc(collection(db, collectionName));
+      const ref = doc(collection(firestoreDb, collectionName));
       const payload = stripUndefined({ ...item });
       delete payload._id;
       delete payload.id;
@@ -636,7 +637,7 @@ class Query {
 
     if (this.options.byId) {
       const id = normalizeId(this.filter._id || this.filter.id);
-      const snap = await getDoc(doc(db, this.Model.collectionName, id));
+      const snap = await getDoc(doc(firestoreDb, this.Model.collectionName, id));
       docs = snap.exists() ? [docFromSnapshot(snap, this.Model)] : [];
       docs = docs.filter((docItem) => matchesFilter(docItem, this.filter));
     } else {
@@ -683,7 +684,7 @@ async function populateDocs(docs, path, selectFields) {
 
   const relatedDocs = new Map();
   await Promise.all(ids.map(async (id) => {
-    const snap = await getDoc(doc(db, populateInfo.collection, id));
+    const snap = await getDoc(doc(firestoreDb, populateInfo.collection, id));
     if (!snap.exists()) return;
     const data = { ...snap.data(), _id: snap.id, id: snap.id };
     if (selectFields) {

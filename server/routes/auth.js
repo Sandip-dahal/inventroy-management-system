@@ -11,44 +11,18 @@ const signToken = (id) => {
 };
 
 const findUserByEmail = async (email) => {
-  try {
-    if (isAdminSdk) {
-      const snapshot = await db.collection('users').where('email', '==', email).limit(1).get();
-      if (snapshot.empty) return null;
-      const doc = snapshot.docs[0];
-      return { id: doc.id, ...doc.data() };
-    }
-
-    const { collection, query, where, limit, getDocs } = require('firebase/firestore');
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('email', '==', email), limit(1));
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) return null;
-    const docSnap = snapshot.docs[0];
-    return { id: docSnap.id, ...docSnap.data() };
-  } catch (error) {
-    console.error('findUserByEmail error:', error);
-    throw error;
-  }
+  const snapshot = await db.collection('users').where('email', '==', email).limit(1).get();
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() };
 };
 
 const findUserById = async (id) => {
-  try {
-    if (isAdminSdk) {
-      const userDoc = await db.collection('users').doc(id).get();
-      if (!userDoc.exists) return null;
-      return { id: userDoc.id, ...userDoc.data() };
-    }
-
-    const { doc, getDoc } = require('firebase/firestore');
-    const userRef = doc(db, 'users', id);
-    const userDoc = await getDoc(userRef);
-    if (!userDoc.exists()) return null;
+  const userDoc = await db.collection('users').doc(id).get();
+  if (userDoc.exists) {
     return { id: userDoc.id, ...userDoc.data() };
-  } catch (error) {
-    console.error('findUserById error:', error);
-    throw error;
   }
+  return null;
 };
 
 router.post('/debug-login', async (req, res) => {
@@ -59,22 +33,11 @@ router.post('/debug-login', async (req, res) => {
     let userFound = false;
 
     try {
-      if (isAdminSdk) {
-        const snapshot = await db.collection('users').get();
-        usersCount = snapshot.size;
-        firebaseStatus = 'connected';
-        const emailSnapshot = await db.collection('users').where('email', '==', email).limit(1).get();
-        userFound = !emailSnapshot.empty;
-      } else {
-        const { collection, query, where, limit, getDocs } = require('firebase/firestore');
-        const usersRef = collection(db, 'users');
-        const snapshot = await getDocs(usersRef);
-        usersCount = snapshot.size;
-        firebaseStatus = 'connected';
-        const q = query(usersRef, where('email', '==', email), limit(1));
-        const emailSnapshot = await getDocs(q);
-        userFound = !emailSnapshot.empty;
-      }
+      const snapshot = await db.collection('users').get();
+      usersCount = snapshot.size;
+      firebaseStatus = 'connected';
+      const emailSnapshot = await db.collection('users').where('email', '==', email).limit(1).get();
+      userFound = !emailSnapshot.empty;
     } catch (dbError) {
       console.error('Firebase error:', dbError);
       firebaseStatus = dbError.message;
@@ -88,7 +51,7 @@ router.post('/debug-login', async (req, res) => {
         emailProvided: email,
         userExists: userFound,
         passwordProvided: !!password,
-        sdk: isAdminSdk ? 'admin' : 'client',
+        sdk: isAdminSdk ? 'admin' : 'client-compat',
         timestamp: new Date().toISOString(),
       },
     });
@@ -183,60 +146,28 @@ router.post('/signup', async (req, res) => {
       });
     }
 
-    let validProductKeyDoc;
+    const keySnapshot = await db.collection('productKeys')
+      .where('key', '==', productKey)
+      .where('isUsed', '==', false)
+      .limit(1)
+      .get();
 
-    if (isAdminSdk) {
-      const keySnapshot = await db.collection('productKeys')
-        .where('key', '==', productKey)
-        .where('isUsed', '==', false)
-        .limit(1)
-        .get();
+    if (keySnapshot.empty) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or already used product key',
+      });
+    }
 
-      if (keySnapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or already used product key',
-        });
-      }
+    const validProductKeyDoc = keySnapshot.docs[0];
+    const emailSnapshot = await db.collection('users').where('email', '==', email).limit(1).get();
+    const phoneSnapshot = await db.collection('users').where('phoneNumber', '==', phoneNumber).limit(1).get();
 
-      validProductKeyDoc = keySnapshot.docs[0];
-
-      const emailSnapshot = await db.collection('users').where('email', '==', email).limit(1).get();
-      const phoneSnapshot = await db.collection('users').where('phoneNumber', '==', phoneNumber).limit(1).get();
-
-      if (!emailSnapshot.empty || !phoneSnapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'User with this email or phone number already exists',
-        });
-      }
-    } else {
-      const { collection, doc, addDoc, getDocs, updateDoc, query, where, limit } = require('firebase/firestore');
-      const productKeysRef = collection(db, 'productKeys');
-      const keyQuery = query(productKeysRef, where('key', '==', productKey), where('isUsed', '==', false), limit(1));
-      const keySnapshot = await getDocs(keyQuery);
-
-      if (keySnapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or already used product key',
-        });
-      }
-
-      validProductKeyDoc = keySnapshot.docs[0];
-
-      const usersRef = collection(db, 'users');
-      const emailQuery = query(usersRef, where('email', '==', email), limit(1));
-      const emailSnapshot = await getDocs(emailQuery);
-      const phoneQuery = query(usersRef, where('phoneNumber', '==', phoneNumber), limit(1));
-      const phoneSnapshot = await getDocs(phoneQuery);
-
-      if (!emailSnapshot.empty || !phoneSnapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'User with this email or phone number already exists',
-        });
-      }
+    if (!emailSnapshot.empty || !phoneSnapshot.empty) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email or phone number already exists',
+      });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -255,36 +186,21 @@ router.post('/signup', async (req, res) => {
       updatedAt: new Date(),
     };
 
-    let userId;
+    const docRef = await db.collection('users').add(newUser);
 
-    if (isAdminSdk) {
-      const docRef = await db.collection('users').add(newUser);
-      userId = docRef.id;
-      await db.collection('productKeys').doc(validProductKeyDoc.id).update({
-        isUsed: true,
-        usedAt: new Date(),
-        usedBy: userId,
-      });
-    } else {
-      const { collection, doc, addDoc, updateDoc } = require('firebase/firestore');
-      const usersRef = collection(db, 'users');
-      const docRef = await addDoc(usersRef, newUser);
-      userId = docRef.id;
-      const productKeyRef = doc(db, 'productKeys', validProductKeyDoc.id);
-      await updateDoc(productKeyRef, {
-        isUsed: true,
-        usedAt: new Date(),
-        usedBy: userId,
-      });
-    }
+    await db.collection('productKeys').doc(validProductKeyDoc.id).update({
+      isUsed: true,
+      usedAt: new Date(),
+      usedBy: docRef.id,
+    });
 
-    const token = signToken(userId);
+    const token = signToken(docRef.id);
     const { password: _, ...userWithoutPassword } = newUser;
 
     res.status(201).json({
       success: true,
       token,
-      data: { user: { id: userId, ...userWithoutPassword } },
+      data: { user: { id: docRef.id, ...userWithoutPassword } },
     });
   } catch (err) {
     console.error('Signup error:', err);
@@ -354,20 +270,11 @@ router.post('/forgot-password', async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const resetPasswordExpires = Date.now() + 10 * 60 * 1000;
 
-    if (isAdminSdk) {
-      await db.collection('users').doc(user.id).update({
-        resetPasswordOTP: otp,
-        resetPasswordExpires,
-        updatedAt: new Date(),
-      });
-    } else {
-      const { doc, updateDoc } = require('firebase/firestore');
-      await updateDoc(doc(db, 'users', user.id), {
-        resetPasswordOTP: otp,
-        resetPasswordExpires,
-        updatedAt: new Date(),
-      });
-    }
+    await db.collection('users').doc(user.id).update({
+      resetPasswordOTP: otp,
+      resetPasswordExpires,
+      updatedAt: new Date(),
+    });
 
     console.log(`OTP for ${email}: ${otp}`);
 
@@ -396,38 +303,20 @@ router.post('/verify-otp', async (req, res) => {
       });
     }
 
-    let user;
+    const snapshot = await db.collection('users')
+      .where('email', '==', email)
+      .where('resetPasswordOTP', '==', otp)
+      .limit(1)
+      .get();
 
-    if (isAdminSdk) {
-      const snapshot = await db.collection('users')
-        .where('email', '==', email)
-        .where('resetPasswordOTP', '==', otp)
-        .limit(1)
-        .get();
-
-      if (snapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid OTP',
-        });
-      }
-
-      user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-    } else {
-      const { collection, query, where, limit, getDocs } = require('firebase/firestore');
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', email), where('resetPasswordOTP', '==', otp), limit(1));
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid OTP',
-        });
-      }
-
-      user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+    if (snapshot.empty) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid OTP',
+      });
     }
+
+    const user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
 
     if (user.resetPasswordExpires && user.resetPasswordExpires < Date.now()) {
       return res.status(400).json({
@@ -474,38 +363,20 @@ router.post('/reset-password', async (req, res) => {
       });
     }
 
-    let user;
+    const snapshot = await db.collection('users')
+      .where('email', '==', email)
+      .where('resetPasswordOTP', '==', otp)
+      .limit(1)
+      .get();
 
-    if (isAdminSdk) {
-      const snapshot = await db.collection('users')
-        .where('email', '==', email)
-        .where('resetPasswordOTP', '==', otp)
-        .limit(1)
-        .get();
-
-      if (snapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or expired OTP',
-        });
-      }
-
-      user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-    } else {
-      const { collection, query, where, limit, getDocs } = require('firebase/firestore');
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', email), where('resetPasswordOTP', '==', otp), limit(1));
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or expired OTP',
-        });
-      }
-
-      user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+    if (snapshot.empty) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP',
+      });
     }
+
+    const user = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
 
     if (user.resetPasswordExpires && user.resetPasswordExpires < Date.now()) {
       return res.status(400).json({
@@ -516,22 +387,12 @@ router.post('/reset-password', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    if (isAdminSdk) {
-      await db.collection('users').doc(user.id).update({
-        password: hashedPassword,
-        resetPasswordOTP: null,
-        resetPasswordExpires: null,
-        updatedAt: new Date(),
-      });
-    } else {
-      const { doc, updateDoc } = require('firebase/firestore');
-      await updateDoc(doc(db, 'users', user.id), {
-        password: hashedPassword,
-        resetPasswordOTP: null,
-        resetPasswordExpires: null,
-        updatedAt: new Date(),
-      });
-    }
+    await db.collection('users').doc(user.id).update({
+      password: hashedPassword,
+      resetPasswordOTP: null,
+      resetPasswordExpires: null,
+      updatedAt: new Date(),
+    });
 
     res.status(200).json({
       success: true,

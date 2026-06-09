@@ -1,5 +1,6 @@
 require('dotenv').config();
-const { db } = require('../firebase');
+const { db, clientDb } = require('../firebase');
+const firestoreDb = clientDb || db;
 const { writeBatch, collection, doc, getDocs, query, limit } = require('firebase/firestore');
 
 const generateProductKey = () => {
@@ -26,12 +27,12 @@ const generateKeys = async () => {
     console.log(`📊 Using Firebase Project: ${process.env.FIREBASE_PROJECT_ID}`);
     console.log(`📊 Firebase API Key exists: ${!!process.env.FIREBASE_API_KEY}`);
 
-    let batch = writeBatch(db);
+    let batch = writeBatch(firestoreDb);
     let batchCount = 0;
     
     for (let i = 0; i < totalKeys; i++) {
       const key = generateProductKey();
-      const docRef = doc(collection(db, 'productKeys'));
+      const docRef = doc(collection(firestoreDb, 'productKeys'));
       
       batch.set(docRef, {
         key,
@@ -45,7 +46,7 @@ const generateKeys = async () => {
       if (batchCount === batchSize || i === totalKeys - 1) {
         await batch.commit();
         console.log(`✓ Generated ${i + 1}/${totalKeys} keys`);
-        batch = writeBatch(db);
+        batch = writeBatch(firestoreDb);
         batchCount = 0;
       }
     }

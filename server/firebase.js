@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const { createCompatDb } = require('./firestoreCompat');
 
 function getServiceAccount() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -35,7 +36,8 @@ function initClientSdk() {
 
 const serviceAccount = getServiceAccount();
 let db;
-let isAdminSdk;
+let clientDb = null;
+let isAdminSdk = false;
 
 if (serviceAccount) {
   if (!admin.apps.length) {
@@ -48,11 +50,12 @@ if (serviceAccount) {
   isAdminSdk = true;
 } else {
   console.warn(
-    'Firebase Admin credentials not found. Using client SDK fallback. ' +
-    'Set FIREBASE_SERVICE_ACCOUNT or FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY for production.'
+    'Firebase Admin credentials not found. Using client SDK with Admin-compatible wrapper. ' +
+    'For best reliability on Render, set FIREBASE_SERVICE_ACCOUNT or ' +
+    'FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY.'
   );
-  db = initClientSdk();
-  isAdminSdk = false;
+  clientDb = initClientSdk();
+  db = createCompatDb(clientDb);
 }
 
-module.exports = { db, isAdminSdk };
+module.exports = { db, clientDb, isAdminSdk };
