@@ -1,21 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { db } = require('../firebase');
-
-const findUserById = async (id) => {
-  const userDoc = await db.collection('users').doc(id).get();
-
-  if (userDoc.exists) {
-    return { id: userDoc.id, ...userDoc.data() };
-  }
-
-  const snapshot = await db.collection('users').where('_id', '==', id).limit(1).get();
-  if (!snapshot.empty) {
-    const doc = snapshot.docs[0];
-    return { id: doc.id, ...doc.data() };
-  }
-
-  return null;
-};
+const { findUserById } = require('../utils/userLookup');
 
 const auth = async (req, res, next) => {
   try {

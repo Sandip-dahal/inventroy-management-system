@@ -2,27 +2,13 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { db, isAdminSdk } = require('../firebase');
+const { findUserByEmail, findUserById } = require('../utils/userLookup');
 const router = express.Router();
 
 const signToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '90d',
   });
-};
-
-const findUserByEmail = async (email) => {
-  const snapshot = await db.collection('users').where('email', '==', email).limit(1).get();
-  if (snapshot.empty) return null;
-  const doc = snapshot.docs[0];
-  return { id: doc.id, ...doc.data() };
-};
-
-const findUserById = async (id) => {
-  const userDoc = await db.collection('users').doc(id).get();
-  if (userDoc.exists) {
-    return { id: userDoc.id, ...userDoc.data() };
-  }
-  return null;
 };
 
 router.post('/debug-login', async (req, res) => {
@@ -411,6 +397,14 @@ router.get('/test', (req, res) => {
   res.json({
     success: true,
     message: 'Auth routes are working correctly!',
+  });
+});
+
+router.get('/test-middleware', require('../middleware/auth'), (req, res) => {
+  res.json({
+    success: true,
+    message: 'Auth middleware passed',
+    user: req.user,
   });
 });
 
