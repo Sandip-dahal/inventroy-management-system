@@ -4,7 +4,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'https://pos-backend-v2-rlxt.on
 
 const api = axios.create({ 
   baseURL: API_URL,
-  timeout: 15000,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json'
   }
