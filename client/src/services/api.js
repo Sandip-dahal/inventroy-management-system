@@ -28,19 +28,21 @@ api.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
-// Response interceptor for error handling - FIXED VERSION
+// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only handle 401 errors, don't clear token for other errors
     if (error.response?.status === 401) {
-      // Clear ALL auth data for ANY 401 response
-      localStorage.removeItem('token');
-      localStorage.removeItem('shopSettings');
-      localStorage.removeItem('heldBills');
-      
-      // Only redirect if not already on public pages
+      // Don't clear token if we're already on login page
       const publicPaths = ['/login', '/signup', '/forgotpassword'];
-      if (!publicPaths.includes(window.location.pathname)) {
+      const isPublicPath = publicPaths.includes(window.location.pathname);
+      
+      // Only clear token and redirect if not already on public page
+      if (!isPublicPath) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('shopSettings');
+        localStorage.removeItem('heldBills');
         window.location.href = '/login';
       }
     }
@@ -94,12 +96,22 @@ export const authAPI = {
   getMe: () => {
     const cacheKey = '/auth/me';
     const cached = getCache(cacheKey);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      return Promise.resolve(cached);
+    }
     
     return api.get('/auth/me')
       .then(res => {
-        setCache(cacheKey, res.data);
+        // Don't cache if there's an error
+        if (res.data && res.data.success !== false) {
+          setCache(cacheKey, res.data);
+        }
         return res.data;
+      })
+      .catch(error => {
+        // Don't cache errors
+        console.error('Error in getMe:', error);
+        throw error;
       });
   },
   verifyPassword: (password) => api.post('/auth/verify-password', { password }).then(res => res.data),

@@ -15,55 +15,41 @@ export const AuthProvider = ({ children }) => {
     // Check if user is logged in on app load
     const token = localStorage.getItem('token');
     if (token) {
-      validateTokenAndFetchUser();
+      fetchCurrentUser();
     } else {
       setLoading(false);
     }
   }, []);
 
-  // New function to validate token before fetching user
-  const validateTokenAndFetchUser = async () => {
+  const fetchCurrentUser = async () => {
     try {
       const response = await authAPI.getMe();
-      setCurrentUser(response.data.user);
+      if (response && response.data && response.data.user) {
+        setCurrentUser(response.data.user);
+      }
     } catch (error) {
-      console.error('Invalid or expired token:', error);
-      // Clear invalid token and all related data
-      localStorage.removeItem('token');
-      localStorage.removeItem('shopSettings');
-      localStorage.removeItem('heldBills');
-      setCurrentUser(null);
-      
-      // Redirect to login if not already there
-      const publicPaths = ['/login', '/signup', '/forgotpassword'];
-      if (!publicPaths.includes(window.location.pathname)) {
-        window.location.href = '/login';
+      console.error('Error fetching current user:', error);
+      // Only clear token if it's a 401 authentication error
+      if (error.response?.status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('shopSettings');
+        localStorage.removeItem('heldBills');
+        setCurrentUser(null);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchCurrentUser = async () => {
-    try {
-      const response = await authAPI.getMe();
-      setCurrentUser(response.data.user);
-    } catch (error) {
-      console.error('Error fetching current user:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('shopSettings');
-      localStorage.removeItem('heldBills');
-      setCurrentUser(null);
-    }
-  };
-
   const login = async (email, password) => {
     try {
       const response = await authAPI.login(email, password);
-      localStorage.setItem('token', response.token);
-      setCurrentUser(response.data.user);
-      console.log('Logged in user:', response.data.user);
-      return response;
+      if (response && response.token) {
+        localStorage.setItem('token', response.token);
+        setCurrentUser(response.data.user);
+        console.log('Logged in user:', response.data.user);
+        return response;
+      }
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -73,22 +59,21 @@ export const AuthProvider = ({ children }) => {
   const signup = async (userData) => {
     try {
       const response = await authAPI.signup(userData);
-      localStorage.setItem('token', response.token);
-      setCurrentUser(response.data.user);
+      if (response && response.token) {
+        localStorage.setItem('token', response.token);
+        setCurrentUser(response.data.user);
+      }
       return response;
     } catch (error) {
       throw error;
     }
   };
 
-  // FIXED logout function - clears everything and redirects
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('shopSettings');
     localStorage.removeItem('heldBills');
     setCurrentUser(null);
-    // Redirect to login page
-    window.location.href = '/login';
   };
 
   const value = {
