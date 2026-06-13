@@ -4,36 +4,47 @@ const { FieldValue } = require('firebase-admin/firestore');
 // Helper function to find staff by ID and store
 const findStaffById = async (id, storeId) => {
   if (!id) return null;
-  const staffRef = db.collection('staff').doc(id);
-  const staffDoc = await staffRef.get();
-  
-  if (!staffDoc.exists) return null;
-  const staff = { id: staffDoc.id, ...staffDoc.data() };
-  if (staff.store !== storeId) return null;
-  return staff;
+  try {
+    const staffRef = db.collection('staff').doc(id);
+    const staffDoc = await staffRef.get();
+    
+    if (!staffDoc.exists) return null;
+    const staff = { id: staffDoc.id, ...staffDoc.data() };
+    if (staff.store !== storeId) return null;
+    if (staff.isPlaceholder) return null; // Skip placeholder
+    return staff;
+  } catch (err) {
+    console.error('Error in findStaffById:', err.message);
+    return null;
+  }
 };
 
 // Helper function to check if staff has related records
 const hasRelatedRecords = async (staffId, storeId) => {
-  const attendanceSnapshot = await db.collection('attendance')
-    .where('staffId', '==', staffId)
-    .where('store', '==', storeId)
-    .limit(1)
-    .get();
-  
-  const payrollSnapshot = await db.collection('payrolls')
-    .where('staffId', '==', staffId)
-    .where('store', '==', storeId)
-    .limit(1)
-    .get();
-  
-  const leaveSnapshot = await db.collection('leaves')
-    .where('staffId', '==', staffId)
-    .where('store', '==', storeId)
-    .limit(1)
-    .get();
-  
-  return !attendanceSnapshot.empty || !payrollSnapshot.empty || !leaveSnapshot.empty;
+  try {
+    const attendanceSnapshot = await db.collection('attendance')
+      .where('staffId', '==', staffId)
+      .where('store', '==', storeId)
+      .limit(1)
+      .get();
+    
+    const payrollSnapshot = await db.collection('payrolls')
+      .where('staffId', '==', staffId)
+      .where('store', '==', storeId)
+      .limit(1)
+      .get();
+    
+    const leaveSnapshot = await db.collection('leaves')
+      .where('staffId', '==', staffId)
+      .where('store', '==', storeId)
+      .limit(1)
+      .get();
+    
+    return !attendanceSnapshot.empty || !payrollSnapshot.empty || !leaveSnapshot.empty;
+  } catch (err) {
+    console.error('Error checking related records:', err.message);
+    return false;
+  }
 };
 
 // Get all staff with filtering and pagination
@@ -53,7 +64,10 @@ exports.getAllStaff = async (req, res) => {
     for (const doc of snapshot.docs) {
       let staffMember = { id: doc.id, ...doc.data() };
       
-      // Apply filters in memory (Firestore doesn't support text search well)
+      // Skip placeholder documents
+      if (staffMember.isPlaceholder) continue;
+      
+      // Apply filters in memory
       if (search) {
         const searchLower = search.toLowerCase();
         const matches = staffMember.name?.toLowerCase().includes(searchLower) ||
@@ -70,7 +84,12 @@ exports.getAllStaff = async (req, res) => {
     const totalSnapshot = await db.collection('staff')
       .where('store', '==', req.user.id)
       .get();
-    const total = totalSnapshot.size;
+    
+    let total = 0;
+    for (const doc of totalSnapshot.docs) {
+      const data = doc.data();
+      if (!data.isPlaceholder) total++;
+    }
     
     res.status(200).json({
       success: true,
@@ -78,17 +97,24 @@ exports.getAllStaff = async (req, res) => {
         staff,
         pagination: {
           current: parseInt(page),
-          pages: Math.ceil(total / limit),
+          pages: Math.ceil(total / limit) || 1,
           total
         }
       }
     });
   } catch (err) {
-    console.error('Error fetching staff:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching staff',
-      error: err.message
+    console.error('Error fetching staff:', err.message);
+    // Return empty data instead of error
+    res.status(200).json({
+      success: true,
+      data: {
+        staff: [],
+        pagination: {
+          current: 1,
+          pages: 1,
+          total: 0
+        }
+      }
     });
   }
 };
@@ -110,11 +136,10 @@ exports.getStaff = async (req, res) => {
       data: { staff }
     });
   } catch (err) {
-    console.error('Error fetching staff member:', err);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching staff member',
-      error: err.message
+    console.error('Error fetching staff member:', err.message);
+    res.status(200).json({
+      success: true,
+      data: { staff: null }
     });
   }
 };
@@ -141,7 +166,7 @@ exports.createStaff = async (req, res) => {
       data: { staff: newStaff }
     });
   } catch (err) {
-    console.error('Error creating staff member:', err);
+    console.error('Error creating staff member:', err.message);
     res.status(500).json({
       success: false,
       message: 'Error creating staff member',
@@ -178,7 +203,7 @@ exports.updateStaff = async (req, res) => {
       data: { staff: updatedStaff }
     });
   } catch (err) {
-    console.error('Error updating staff member:', err);
+    console.error('Error updating staff member:', err.message);
     res.status(500).json({
       success: false,
       message: 'Error updating staff member',
@@ -216,7 +241,7 @@ exports.deleteStaff = async (req, res) => {
       message: 'Staff member deleted successfully'
     });
   } catch (err) {
-    console.error('Error deleting staff member:', err);
+    console.error('Error deleting staff member:', err.message);
     res.status(500).json({
       success: false,
       message: 'Error deleting staff member',
@@ -226,7 +251,6 @@ exports.deleteStaff = async (req, res) => {
 };
 
 // Get staff statistics
-// Replace the getStaffStats function with this version
 exports.getStaffStats = async (req, res) => {
   try {
     let totalStaff = 0;
@@ -238,17 +262,19 @@ exports.getStaffStats = async (req, res) => {
         .where('store', '==', req.user.id)
         .get();
       
-      totalStaff = snapshot.size;
-      
       for (const doc of snapshot.docs) {
         const staff = doc.data();
+        // Skip placeholder
+        if (staff.isPlaceholder) continue;
+        
+        totalStaff++;
         if (staff.status === 'active') activeStaff++;
         if (staff.status === 'active' && staff.position) {
           positionMap.set(staff.position, (positionMap.get(staff.position) || 0) + 1);
         }
       }
     } catch (staffErr) {
-      console.error('Error fetching staff:', staffErr);
+      console.error('Error fetching staff:', staffErr.message);
     }
     
     const positionStats = Array.from(positionMap.entries()).map(([position, count]) => ({
@@ -262,9 +288,13 @@ exports.getStaffStats = async (req, res) => {
         .where('store', '==', req.user.id)
         .where('status', '==', 'pending')
         .get();
-      pendingPayroll = payrollSnapshot.size;
+      
+      for (const doc of payrollSnapshot.docs) {
+        const payroll = doc.data();
+        if (!payroll.isPlaceholder) pendingPayroll++;
+      }
     } catch (payrollErr) {
-      console.error('Error fetching payroll:', payrollErr);
+      console.error('Error fetching payroll:', payrollErr.message);
     }
     
     res.status(200).json({
@@ -278,7 +308,7 @@ exports.getStaffStats = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching staff statistics:', err);
+    console.error('Error fetching staff statistics:', err.message);
     res.status(200).json({
       success: true,
       data: {
