@@ -143,22 +143,44 @@ const generateBillPDF = async (bill) => {
 };
 
 // Helper function to get next bill number
+// Helper function to get next bill number
 const getNextBillNumber = async (storeId) => {
-  const billsRef = db.collection('bills');
-  const snapshot = await billsRef
-    .where('store', '==', storeId)
-    .orderBy('billNumber', 'desc')
-    .limit(1)
-    .get();
-  
-  if (snapshot.empty) {
-    return 1;
+  try {
+    const billsRef = db.collection('bills');
+    const snapshot = await billsRef
+      .where('store', '==', storeId)
+      .orderBy('billNumber', 'desc')
+      .limit(1)
+      .get();
+    
+    if (snapshot.empty) {
+      return 1;
+    }
+    
+    const lastBill = snapshot.docs[0].data();
+    // Skip placeholder
+    if (lastBill.isPlaceholder) return 1;
+    return lastBill.billNumber + 1;
+  } catch (error) {
+    console.error('Error getting next bill number:', error.message);
+    // If index is missing, return a random number or use a fallback method
+    if (error.code === 9 || error.message.includes('index')) {
+      console.log('Index not ready yet, using fallback bill number');
+      // Fallback: count documents instead of ordering
+      const allBills = await db.collection('bills')
+        .where('store', '==', storeId)
+        .get();
+      let maxBillNumber = 0;
+      allBills.forEach(doc => {
+        const bill = doc.data();
+        if (!bill.isPlaceholder && bill.billNumber > maxBillNumber) {
+          maxBillNumber = bill.billNumber;
+        }
+      });
+      return maxBillNumber + 1;
+    }
+    throw error;
   }
-  
-  const lastBill = snapshot.docs[0].data();
-  // Skip placeholder
-  if (lastBill.isPlaceholder) return 1;
-  return lastBill.billNumber + 1;
 };
 
 // ==================== DASHBOARD STATS ROUTES (Must come before /:id) ====================
