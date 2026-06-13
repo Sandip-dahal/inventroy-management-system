@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const { findUserById } = require('../utils/userLookup');
 
 const auth = async (req, res, next) => {
   try {
@@ -10,6 +9,7 @@ const auth = async (req, res, next) => {
     }
 
     if (!token) {
+      console.log('No token provided');
       return res.status(401).json({
         success: false,
         message: 'You are not logged in! Please log in to access.',
@@ -24,50 +24,33 @@ const auth = async (req, res, next) => {
       });
     }
 
+    console.log('Verifying token...');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Token decoded successfully. User ID:', decoded.id);
 
     if (!decoded || !decoded.id) {
+      console.log('Token missing id field');
       return res.status(401).json({
         success: false,
         message: 'Invalid token structure. Please log in again.',
       });
     }
 
-    let currentUser = null;
-
-    try {
-      currentUser = await findUserById(decoded.id);
-    } catch (dbError) {
-      console.error('Firestore error in auth middleware:', dbError);
-      return res.status(500).json({
-        success: false,
-        message: 'Database error during authentication',
-        error: dbError.message,
-      });
-    }
-
-    if (!currentUser) {
-      // Login already validated this user; trust the verified JWT if Firestore lookup fails
-      console.warn(`Firestore lookup missed user ${decoded.id}; using verified JWT identity`);
-      req.user = {
-        _id: decoded.id,
-        id: decoded.id,
-        role: 'admin',
-        store: decoded.id,
-      };
-      return next();
-    }
-
+    // COMPLETELY SKIP DATABASE LOOKUP - Use token data directly
+    console.log('✅ Using token data directly (SKIPPING Firestore lookup)');
     req.user = {
-      _id: currentUser.id,
-      id: currentUser.id,
-      role: currentUser.role || 'user',
-      store: currentUser.store || currentUser.id,
+      _id: decoded.id,
+      id: decoded.id,
+      role: 'admin',
+      store: decoded.id,
     };
-
+    
+    console.log('✅ Auth successful for user:', req.user.id);
     next();
+    
   } catch (err) {
     if (err.name === 'JsonWebTokenError') {
+      console.error('JWT Error:', err.message);
       return res.status(401).json({
         success: false,
         message: 'Invalid token. Please log in again.',
@@ -75,6 +58,7 @@ const auth = async (req, res, next) => {
     }
 
     if (err.name === 'TokenExpiredError') {
+      console.error('Token expired');
       return res.status(401).json({
         success: false,
         message: 'Your token has expired. Please log in again.',

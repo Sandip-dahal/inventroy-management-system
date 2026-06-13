@@ -8,38 +8,17 @@ const app = express();
 
 /**
  * =========================
- * CORS CONFIG (FIXED)
+ * CORS CONFIG - Allow all origins for local development
  * =========================
  */
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:3002',
-  'http://localhost:5000',
-  'http://localhost:5001',
-  'http://localhost:5002',
-  'https://progress-tracker-frontend-tc8d.vercel.app'
-];
-
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // mobile apps / postman
-
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.endsWith('.vercel.app')
-    ) {
-      return callback(null, true);
-    }
-
-    return callback(new Error('Not allowed by CORS'));
-  },
+  origin: true,  // Allow all origins (for local testing only)
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Cache-Control']
 }));
 
-// Preflight
+// Preflight requests
 app.options('*', cors());
 
 /**
@@ -54,7 +33,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
   if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
-    console.log('Request body:', JSON.stringify(req.body, null, 2));
+    const safeBody = { ...req.body };
+    if (safeBody.password) safeBody.password = '***HIDDEN***';
+    if (safeBody.confirmPassword) safeBody.confirmPassword = '***HIDDEN***';
+    console.log('Request body:', JSON.stringify(safeBody, null, 2));
   }
   next();
 });
@@ -193,7 +175,6 @@ app.use((err, req, res, next) => {
   console.error('ERROR:', err.message);
   console.error('Stack:', err.stack);
 
-  // Validation Error
   if (err.name === 'ValidationError') {
     const errors = Object.values(err.errors).map(el => el.message);
     return res.status(400).json({
@@ -203,7 +184,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Duplicate Key Error
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue)[0];
     return res.status(400).json({
@@ -212,7 +192,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // JWT Errors
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       success: false,
@@ -227,7 +206,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // CORS Errors
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
@@ -235,7 +213,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Default Server Error
   res.status(500).json({
     success: false,
     message: 'Server error',
@@ -260,6 +237,8 @@ const server = app.listen(PORT, () => {
   console.log(`Health: http://localhost:${PORT}/api/health`);
   console.log(`DB Status: http://localhost:${PORT}/api/db-status`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log('CORS: Allow all origins (development mode)');
+  console.log('Auth: Using JWT only (no database lookup)');
   console.log('==============================');
 });
 
