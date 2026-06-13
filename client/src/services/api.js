@@ -973,6 +973,14 @@ export const settingsAPI = {
     }
   },
   
+  // ADD THIS NEW METHOD
+  getQRCodeImageUrl: () => {
+    const token = localStorage.getItem('token');
+    if (!token) return null;
+    // Add timestamp to bypass cache
+    return `${API_URL}/settings/qr-code/image?t=${Date.now()}`;
+  },
+  
   updateQRCode: (qrData) => {
     clearCache('/settings');
     return api.post('/settings/qr-code', qrData)

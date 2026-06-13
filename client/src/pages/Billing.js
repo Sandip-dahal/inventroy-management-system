@@ -380,52 +380,53 @@ const Billing = () => {
     setCartErrors(updatedErrors);
   };
 
-  // Handle payment confirmation from modal
-  const handlePaymentConfirm = async (payment) => {
-    // Validate cart before proceeding
-    if (!validateCart()) {
-      setError('Please fill in all required remarks for free items');
-      return;
-    }
+// Handle payment confirmation from modal
+// Handle payment confirmation from modal
+const handlePaymentConfirm = async (payment) => {
+  // Validate cart before proceeding
+  if (!validateCart()) {
+    setError('Please fill in all required remarks for free items');
+    return;
+  }
+  
+  try {
+    setLoading(true);
     
-    try {
-      setLoading(true);
-      
-      // Create bill data
-      const billNumber = await getNextBillNumber();
-      const nepaliDate = getNepaliDate();
-      
-      const billData = {
-        billNumber,
-        nepaliDate,
-        items: cart,
-        customer,
-        subtotal,
-        discount: discountAmount,
-        tax: taxAmount,
-        total: grandTotal,
-        payment, // Use the payment object instead of paymentMethod
-        date: new Date().toISOString(),
-        shopName,
-        shopInfo,
-        vatRate: vatRegistered ? vatRate : 0,
-        vatEnabled: vatRegistered,
-        qrCodeContent, // Include QR code content in bill data
-        qrCodeImage // Include QR code image in bill data
-      };
-      
-      setCurrentBill(billData);
-      setIsReceiptModalOpen(true);
-      setIsPaymentModalOpen(false);
-      
-      setLoading(false);
-      
-    } catch (error) {
-      console.error('Error during checkout:', error);
-      setError('Failed to complete sale. Please try again.');
-      setLoading(false);
-    }
-  };
+    // Create bill data
+    const billNumber = await getNextBillNumber();
+    const nepaliDate = getNepaliDate();
+    
+    const billData = {
+      billNumber,
+      nepaliDate,
+      items: cart,
+      customer,
+      subtotal,
+      discount: discountAmount,
+      tax: taxAmount,
+      total: grandTotal,
+      payment,
+      date: new Date().toISOString(),
+      shopName,
+      shopInfo,
+      vatRate: vatRegistered ? vatRate : 0,
+      vatEnabled: vatRegistered,
+      qrCodeContent,
+      qrCodeImage: '' // No need for image URL, we use SVG
+    };
+    
+    setCurrentBill(billData);
+    setIsReceiptModalOpen(true);
+    setIsPaymentModalOpen(false);
+    
+    setLoading(false);
+    
+  } catch (error) {
+    console.error('Error during checkout:', error);
+    setError('Failed to complete sale. Please try again.');
+    setLoading(false);
+  }
+};
 
   // Save bill to Firebase and update stock - FIXED: Handle product ID correctly
   const saveBill = async () => {
@@ -1283,19 +1284,18 @@ const Billing = () => {
       )}
 
       {/* Receipt Modal */}
-      {isReceiptModalOpen && currentBill && (
-        <ReceiptModal
-          bill={currentBill}
-          onClose={() => setIsReceiptModalOpen(false)}
-          onSave={saveBill}
-          onPrintAndSave={printAndSaveBill}
-          isPrintPreview={isPrintPreview}
-          setIsPrintPreview={setIsPrintPreview}
-          qrCodeContent={qrCodeContent}
-          qrCodeImage={qrCodeImage}
-          formatQRContentForDisplay={formatQRContentForDisplay}
-        />
-      )}
+     {isReceiptModalOpen && currentBill && (
+  <ReceiptModal
+    bill={currentBill}
+    onClose={() => setIsReceiptModalOpen(false)}
+    onSave={saveBill}
+    onPrintAndSave={printAndSaveBill}
+    isPrintPreview={isPrintPreview}
+    setIsPrintPreview={setIsPrintPreview}
+    qrCodeContent={qrCodeContent}
+    formatQRContentForDisplay={formatQRContentForDisplay}
+  />
+)}
     </div>
   );
 };
@@ -1618,7 +1618,7 @@ const HoldBillModal = ({ heldBills, onClose, onResumeBill, onDeleteBill, onHoldC
 };
 
 // Enhanced Receipt Modal Component
-const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, setIsPrintPreview, qrCodeContent, qrCodeImage, formatQRContentForDisplay }) => {
+const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, setIsPrintPreview, qrCodeContent, formatQRContentForDisplay }) => {
   const [copied, setCopied] = useState(false);
   
   const copyToClipboard = () => {
@@ -1674,7 +1674,7 @@ const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, s
             
             <div className="receipt-items">
               <div className="items-label">ITEMS</div>
-              <table>
+              <table className="items-table">
                 <thead>
                   <tr>
                     <th>Description</th>
@@ -1769,24 +1769,23 @@ const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, s
               )}
             </div>
             
+            {/* QR Code Section - SIMPLIFIED */}
             {qrCodeContent && (
               <div className="receipt-qr">
-                <div className="qr-title">QR CODE</div>
-                <div className="qr-instruction">Scan for contact information:</div>
-                <div className="qr-code-image">
-                  {qrCodeImage ? (
-                    <img src={qrCodeImage} alt="QR Code" style={{ width: '100px', height: '100px' }} />
-                  ) : (
-                    <QRCodeSVG 
-                      value={qrCodeContent} 
-                      size={100}
-                      level="H"
-                      marginSize={2}
-                    />
-                  )}
+                <div className="qr-title">SCAN FOR CONTACT INFO</div>
+                <div className="qr-instruction">Scan to save contact:</div>
+                <div className="qr-code-image" style={{ display: 'flex', justifyContent: 'center', margin: '10px 0' }}>
+                  <QRCodeSVG 
+                    value={qrCodeContent} 
+                    size={120}
+                    level="H"
+                    marginSize={2}
+                    style={{ border: '1px solid #ddd', padding: '5px' }}
+                  />
                 </div>
                 <div 
                   className="qr-content" 
+                  style={{ fontSize: '10px', textAlign: 'center', marginTop: '5px' }}
                   dangerouslySetInnerHTML={{ __html: formatQRContentForDisplay(qrCodeContent) }}
                 />
               </div>
@@ -1826,5 +1825,6 @@ const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, s
     </div>
   );
 };
+
 
 export default Billing;
