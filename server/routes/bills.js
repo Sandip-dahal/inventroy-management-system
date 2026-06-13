@@ -6,6 +6,48 @@ const auth = require('../middleware/auth');
 const { db } = require('../firebase');
 const { FieldValue } = require('firebase-admin/firestore');
 
+// ==================== INITIALIZATION ROUTE ====================
+// Initialize bills collection
+router.post('/init', auth, async (req, res) => {
+  try {
+    console.log('Initializing bills collection for store:', req.user.id);
+    
+    // Check if bills collection exists
+    const check = await db.collection('bills').limit(1).get();
+    if (check.empty) {
+      const placeholder = {
+        store: req.user.id,
+        isPlaceholder: true,
+        billNumber: 0,
+        total: 0,
+        createdAt: new Date()
+      };
+      const docRef = await db.collection('bills').add(placeholder);
+      await db.collection('bills').doc(docRef.id).delete();
+      console.log('Bills collection initialized');
+    }
+    
+    // Also initialize paymentRecords collection
+    const paymentCheck = await db.collection('paymentRecords').limit(1).get();
+    if (paymentCheck.empty) {
+      const paymentPlaceholder = {
+        store: req.user.id,
+        isPlaceholder: true,
+        amount: 0,
+        createdAt: new Date()
+      };
+      const paymentRef = await db.collection('paymentRecords').add(paymentPlaceholder);
+      await db.collection('paymentRecords').doc(paymentRef.id).delete();
+      console.log('PaymentRecords collection initialized');
+    }
+    
+    res.json({ success: true, message: 'Bills collection initialized successfully' });
+  } catch (error) {
+    console.error('Init error:', error);
+    res.json({ success: true, message: 'Collection may already exist' });
+  }
+});
+
 // Helper function to generate PDF bill
 const generateBillPDF = async (bill) => {
   return new Promise((resolve, reject) => {
@@ -114,6 +156,8 @@ const getNextBillNumber = async (storeId) => {
   }
   
   const lastBill = snapshot.docs[0].data();
+  // Skip placeholder
+  if (lastBill.isPlaceholder) return 1;
   return lastBill.billNumber + 1;
 };
 
@@ -138,7 +182,7 @@ router.get('/customers/top-spender-this-month', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.customer && bill.customer.phone) {
+      if (!bill.isPlaceholder && bill.customer && bill.customer.phone) {
         const phone = bill.customer.phone;
         const currentSpent = customerSpending.get(phone) || 0;
         customerSpending.set(phone, {
@@ -186,7 +230,7 @@ router.get('/customers/new-this-month', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.customer && bill.customer.phone) {
+      if (!bill.isPlaceholder && bill.customer && bill.customer.phone) {
         const phone = bill.customer.phone;
         let billDate;
         if (bill.createdAt && typeof bill.createdAt.toDate === 'function') {
@@ -238,7 +282,7 @@ router.get('/customers/returning-percentage', auth, async (req, res) => {
     const thisMonthCustomers = new Set();
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.customer && bill.customer.phone) {
+      if (!bill.isPlaceholder && bill.customer && bill.customer.phone) {
         thisMonthCustomers.add(bill.customer.phone);
       }
     });
@@ -257,7 +301,7 @@ router.get('/customers/returning-percentage', auth, async (req, res) => {
     
     allSnapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.customer && bill.customer.phone && thisMonthCustomers.has(bill.customer.phone)) {
+      if (!bill.isPlaceholder && bill.customer && bill.customer.phone && thisMonthCustomers.has(bill.customer.phone)) {
         const phone = bill.customer.phone;
         let billDate;
         if (bill.createdAt && typeof bill.createdAt.toDate === 'function') {
@@ -305,7 +349,7 @@ router.get('/customers/credit-count', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.payment && bill.payment.methods && bill.customer && bill.customer.phone) {
+      if (!bill.isPlaceholder && bill.payment && bill.payment.methods && bill.customer && bill.customer.phone) {
         const hasCredit = bill.payment.methods.some(method => method.method === 'credit');
         if (hasCredit) {
           creditCustomers.add(bill.customer.phone);
@@ -340,7 +384,7 @@ router.get('/sales/today/products', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.items && Array.isArray(bill.items)) {
+      if (!bill.isPlaceholder && bill.items && Array.isArray(bill.items)) {
         bill.items.forEach(item => {
           const productName = item.name || item.productName || 'Unknown';
           if (productSales.has(productName)) {
@@ -404,14 +448,16 @@ router.get('/sales/today', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      totalSales += bill.total || 0;
-      bills.push({ id: doc.id, ...bill });
+      if (!bill.isPlaceholder) {
+        totalSales += bill.total || 0;
+        bills.push({ id: doc.id, ...bill });
+      }
     });
     
     res.json({
       success: true,
       totalSales,
-      billsCount: snapshot.size,
+      billsCount: bills.length,
       bills
     });
   } catch (error) {
@@ -438,14 +484,19 @@ router.get('/sales/yesterday', auth, async (req, res) => {
       .get();
     
     let totalSales = 0;
+    let billCount = 0;
     snapshot.forEach(doc => {
-      totalSales += doc.data().total || 0;
+      const bill = doc.data();
+      if (!bill.isPlaceholder) {
+        totalSales += bill.total || 0;
+        billCount++;
+      }
     });
     
     res.json({
       success: true,
       totalSales,
-      billsCount: snapshot.size
+      billsCount: billCount
     });
   } catch (error) {
     console.error('Error fetching yesterday\'s sales:', error);
@@ -478,14 +529,16 @@ router.get('/sales/last7days', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      let billDate;
-      if (bill.createdAt && typeof bill.createdAt.toDate === 'function') {
-        billDate = bill.createdAt.toDate();
-      } else {
-        billDate = new Date(bill.createdAt);
+      if (!bill.isPlaceholder) {
+        let billDate;
+        if (bill.createdAt && typeof bill.createdAt.toDate === 'function') {
+          billDate = bill.createdAt.toDate();
+        } else {
+          billDate = new Date(bill.createdAt);
+        }
+        const dayName = daysOfWeek[billDate.getDay()];
+        salesByDay[dayName] += bill.total || 0;
       }
-      const dayName = daysOfWeek[billDate.getDay()];
-      salesByDay[dayName] += bill.total || 0;
     });
     
     const last7DaysSales = daysOfWeek.map(day => salesByDay[day]);
@@ -523,15 +576,16 @@ router.get('/profit/today', auth, async (req, res) => {
 
     for (const doc of snapshot.docs) {
       const bill = doc.data();
-      
-      for (const item of bill.items) {
-        const itemRevenue = item.price * item.quantity;
-        const itemCost = (item.costPrice || item.price * 0.7) * item.quantity;
-        
-        totalRevenue += itemRevenue;
-        totalCost += itemCost;
-        totalProfit += (itemRevenue - itemCost);
-        itemsSold += item.quantity;
+      if (!bill.isPlaceholder) {
+        for (const item of bill.items) {
+          const itemRevenue = item.price * item.quantity;
+          const itemCost = (item.costPrice || item.price * 0.7) * item.quantity;
+          
+          totalRevenue += itemRevenue;
+          totalCost += itemCost;
+          totalProfit += (itemRevenue - itemCost);
+          itemsSold += item.quantity;
+        }
       }
     }
 
@@ -596,15 +650,16 @@ router.get('/profit/range', auth, async (req, res) => {
 
     for (const doc of snapshot.docs) {
       const bill = doc.data();
-      
-      for (const item of bill.items) {
-        const itemRevenue = item.price * item.quantity;
-        const itemCost = (item.costPrice || item.price * 0.7) * item.quantity;
-        
-        totalRevenue += itemRevenue;
-        totalCost += itemCost;
-        totalProfit += (itemRevenue - itemCost);
-        itemsSold += item.quantity;
+      if (!bill.isPlaceholder) {
+        for (const item of bill.items) {
+          const itemRevenue = item.price * item.quantity;
+          const itemCost = (item.costPrice || item.price * 0.7) * item.quantity;
+          
+          totalRevenue += itemRevenue;
+          totalCost += itemCost;
+          totalProfit += (itemRevenue - itemCost);
+          itemsSold += item.quantity;
+        }
       }
     }
 
@@ -721,11 +776,18 @@ router.get('/', auth, async (req, res) => {
     const totalSnapshot = await billsRef
       .where('store', '==', req.user.id)
       .get();
-    const total = totalSnapshot.size;
+    
+    let total = 0;
+    for (const doc of totalSnapshot.docs) {
+      if (!doc.data().isPlaceholder) total++;
+    }
     
     const bills = [];
     snapshot.forEach(doc => {
-      bills.push({ id: doc.id, ...doc.data() });
+      const bill = doc.data();
+      if (!bill.isPlaceholder) {
+        bills.push({ id: doc.id, ...bill });
+      }
     });
     
     res.json({
@@ -735,12 +797,12 @@ router.get('/', auth, async (req, res) => {
         page,
         limit,
         total,
-        pages: Math.ceil(total / limit)
+        pages: Math.ceil(total / limit) || 1
       }
     });
   } catch (error) {
     console.error('Error fetching bills:', error);
-    res.json({ success: true, bills: [], pagination: { page: 1, limit: 20, total: 0, pages: 0 } });
+    res.json({ success: true, bills: [], pagination: { page: 1, limit: 20, total: 0, pages: 1 } });
   }
 });
 
@@ -758,8 +820,12 @@ router.get('/bill-number/:billNumber', auth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Bill not found' });
     }
     
-    const bill = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-    res.json({ success: true, bill });
+    const bill = snapshot.docs[0].data();
+    if (bill.isPlaceholder) {
+      return res.status(404).json({ success: false, error: 'Bill not found' });
+    }
+    
+    res.json({ success: true, bill: { id: snapshot.docs[0].id, ...bill } });
   } catch (error) {
     console.error('Error fetching bill:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch bill' });
@@ -780,8 +846,12 @@ router.get('/:billNumber/pdf', auth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Bill not found' });
     }
     
-    const bill = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-    const pdfBuffer = await generateBillPDF(bill);
+    const bill = snapshot.docs[0].data();
+    if (bill.isPlaceholder) {
+      return res.status(404).json({ success: false, error: 'Bill not found' });
+    }
+    
+    const pdfBuffer = await generateBillPDF({ id: snapshot.docs[0].id, ...bill });
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=bill_${bill.billNumber}.pdf`);
@@ -805,6 +875,10 @@ router.get('/:id', auth, async (req, res) => {
     }
     
     const bill = billDoc.data();
+    if (bill.isPlaceholder) {
+      return res.status(404).json({ success: false, error: 'Bill not found' });
+    }
+    
     if (bill.store !== req.user.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
@@ -827,6 +901,10 @@ router.delete('/:id', auth, async (req, res) => {
     }
     
     const bill = billDoc.data();
+    if (bill.isPlaceholder) {
+      return res.status(404).json({ success: false, error: 'Bill not found' });
+    }
+    
     if (bill.store !== req.user.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
@@ -863,9 +941,8 @@ router.get('/credit/customers', auth, async (req, res) => {
     const customersMap = new Map();
     
     snapshot.forEach(doc => {
-      const bill = { id: doc.id, ...doc.data() };
-      
-      if (bill.customer && bill.customer.phone && bill.payment && bill.payment.methods) {
+      const bill = doc.data();
+      if (!bill.isPlaceholder && bill.customer && bill.customer.phone && bill.payment && bill.payment.methods) {
         const hasCredit = bill.payment.methods.some(method => method.method === 'credit');
         
         if (hasCredit) {
@@ -914,6 +991,10 @@ router.post('/credit/process-payment', auth, async (req, res) => {
       }
       
       const bill = billDoc.data();
+      if (bill.isPlaceholder) {
+        return res.status(404).json({ success: false, error: 'Bill not found' });
+      }
+      
       if (bill.store !== req.user.id) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
@@ -941,6 +1022,10 @@ router.post('/credit/process-payment', auth, async (req, res) => {
       }
       
       const bill = { id: billDoc.id, ...billDoc.data() };
+      if (bill.isPlaceholder) {
+        return res.status(404).json({ success: false, error: 'Bill not found' });
+      }
+      
       if (bill.store !== req.user.id) {
         return res.status(403).json({ success: false, error: 'Access denied' });
       }
@@ -1019,7 +1104,10 @@ router.post('/credit/process-payment', auth, async (req, res) => {
       
       const customerBills = [];
       snapshot.forEach(doc => {
-        customerBills.push({ id: doc.id, ...doc.data() });
+        const bill = doc.data();
+        if (!bill.isPlaceholder) {
+          customerBills.push({ id: doc.id, ...bill });
+        }
       });
       
       if (customerBills.length === 0) {
@@ -1135,6 +1223,10 @@ router.patch('/:id/payment', auth, async (req, res) => {
     }
     
     const bill = billDoc.data();
+    if (bill.isPlaceholder) {
+      return res.status(404).json({ success: false, error: 'Bill not found' });
+    }
+    
     if (bill.store !== req.user.id) {
       return res.status(403).json({ success: false, error: 'Access denied' });
     }
@@ -1167,7 +1259,7 @@ router.get('/credit/credit-bills', auth, async (req, res) => {
     const creditBills = [];
     snapshot.forEach(doc => {
       const bill = doc.data();
-      if (bill.payment && bill.payment.methods) {
+      if (!bill.isPlaceholder && bill.payment && bill.payment.methods) {
         const hasCredit = bill.payment.methods.some(method => method.method === 'credit');
         if (hasCredit) {
           creditBills.push({ id: doc.id, ...bill });
@@ -1218,22 +1310,24 @@ router.get('/payment-methods/distribution', auth, async (req, res) => {
     
     snapshot.forEach(doc => {
       const bill = doc.data();
-      totalAmount += bill.total || 0;
-      
-      if (bill.payment && bill.payment.methods) {
-        if (bill.payment.type === 'single' && bill.payment.methods[0]) {
-          const method = bill.payment.methods[0].method;
-          if (distribution[method]) {
-            distribution[method].count++;
-            distribution[method].amount += bill.payment.methods[0].amount;
-          }
-        } else if (bill.payment.methods.length > 0) {
-          bill.payment.methods.forEach(method => {
-            if (distribution[method.method]) {
-              distribution[method.method].count++;
-              distribution[method.method].amount += method.amount;
+      if (!bill.isPlaceholder) {
+        totalAmount += bill.total || 0;
+        
+        if (bill.payment && bill.payment.methods) {
+          if (bill.payment.type === 'single' && bill.payment.methods[0]) {
+            const method = bill.payment.methods[0].method;
+            if (distribution[method]) {
+              distribution[method].count++;
+              distribution[method].amount += bill.payment.methods[0].amount;
             }
-          });
+          } else if (bill.payment.methods.length > 0) {
+            bill.payment.methods.forEach(method => {
+              if (distribution[method.method]) {
+                distribution[method.method].count++;
+                distribution[method.method].amount += method.amount;
+              }
+            });
+          }
         }
       }
     });
