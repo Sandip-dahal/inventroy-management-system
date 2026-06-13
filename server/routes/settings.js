@@ -274,13 +274,17 @@ router.post('/qr-code', auth, async (req, res) => {
 });
 
 // Get QR code image
+// Get QR code image
 router.get('/qr-code/image', auth, async (req, res) => {
   try {
     const settings = await findSettingsByStore(req.user.id);
     
     if (!settings || !settings.qrCodeImage) {
-      // Return 204 No Content instead of 404 to prevent frontend errors
-      return res.status(204).send();
+      // Return 404 instead of 204 to let frontend know no QR code exists
+      return res.status(404).json({
+        success: false,
+        message: 'QR code not found. Please generate QR code in settings first.'
+      });
     }
     
     let qrBuffer;
@@ -289,14 +293,21 @@ router.get('/qr-code/image', auth, async (req, res) => {
     } else if (Buffer.isBuffer(settings.qrCodeImage)) {
       qrBuffer = settings.qrCodeImage;
     } else {
-      return res.status(204).send();
+      return res.status(404).json({
+        success: false,
+        message: 'QR code image data is invalid'
+      });
     }
     
     res.set('Content-Type', `image/${settings.qrCodeImageType || 'png'}`);
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.send(qrBuffer);
   } catch (err) {
     console.error('Error fetching QR code image:', err);
-    res.status(204).send(); // Return no content instead of error
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching QR code image'
+    });
   }
 });
 
