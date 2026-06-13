@@ -1,5 +1,4 @@
-// src/App.js
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import Login from './pages/Login';
@@ -15,13 +14,45 @@ import Suppliers from './pages/Suppliers';
 import RetailDashboard from './pages/RetailDashboard';
 import StaffManagementSystem from './pages/StaffManagementSystem';
 import SalesDashboard from './pages/SalesDashboard';
-import CustomersDashboard from './pages/CustomersDashboard'; // Add this import
+import CustomersDashboard from './pages/CustomersDashboard';
 import './App.css';
 
 // A simple protected route component
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('token');
-  return token ? children : <Navigate to="/login" />;
+  const [isValid, setIsValid] = useState(true);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    if (!token) {
+      setIsValid(false);
+      setChecking(false);
+      return;
+    }
+
+    // Quick validation - don't make API call
+    // Just check if token exists and is properly formatted
+    try {
+      const tokenParts = token.split('.');
+      if (tokenParts.length === 3) {
+        setIsValid(true);
+      } else {
+        setIsValid(false);
+        localStorage.removeItem('token');
+      }
+    } catch (error) {
+      setIsValid(false);
+      localStorage.removeItem('token');
+    } finally {
+      setChecking(false);
+    }
+  }, [token]);
+
+  if (checking) {
+    return <div>Loading...</div>; // Or a spinner
+  }
+
+  return isValid ? children : <Navigate to="/login" />;
 };
 
 // Layout component to handle sidebar and content

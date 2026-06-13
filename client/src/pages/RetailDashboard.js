@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { billingAPI, inventoryAPI, staffAPI, attendanceAPI, payrollAPI, supplierTransactionAPI } from '../services/api';
 import { Bar, Line, Doughnut } from 'react-chartjs-2';
 import NepaliDate from 'nepali-date';
+import api from '../services/api';
 
 import {
   Chart as ChartJS,
@@ -35,7 +36,12 @@ ChartJS.register(
 
 const RetailDashboard = () => {
   const { currentUser } = useAuth();
-
+  const navigate = useNavigate();
+  
+  // ALL HOOKS MUST BE DECLARED BEFORE ANY RETURN STATEMENT
+  // Loading state to prevent flash
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  
   // State for dashboard data
   const [dashboardData, setDashboardData] = useState({
     salesOverview: {
@@ -71,7 +77,9 @@ const RetailDashboard = () => {
     },
     notifications: [],
   });
+  
   const [totalPending, setTotalPending] = useState(0);
+  
   // Profit data state
   const [profitData, setProfitData] = useState({
     todayProfit: 0,
@@ -114,11 +122,8 @@ const RetailDashboard = () => {
 
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-
   const [nepalDateTime, setNepalDateTime] = useState('');
   const [nepaliDate, setNepaliDate] = useState('');
-
-  const navigate = useNavigate();
 
   // Weights for different performance categories
   const weights = {
@@ -151,15 +156,14 @@ const RetailDashboard = () => {
   };
 
   // Function to get Nepali date
- const getNepaliDate = () => {
-  const now = new Date();
-  const nepaliDateObj = new NepaliDate(now);
-  return nepaliDateObj.format('dddd, DD MMMM YYYY');
-};
+  const getNepaliDate = () => {
+    const now = new Date();
+    const nepaliDateObj = new NepaliDate(now);
+    return nepaliDateObj.format('dddd, DD MMMM YYYY');
+  };
 
   // Function to update Nepal date and time
   const updateNepalTime = () => {
-    // English time in Nepal timezone
     const options = {
       timeZone: 'Asia/Kathmandu',
       hour: 'numeric',
@@ -169,12 +173,19 @@ const RetailDashboard = () => {
     const formatter = new Intl.DateTimeFormat('en-US', options);
     const now = new Date();
     const englishTime = formatter.format(now);
-    
-    // Get Nepali date
     const nepaliDateString = getNepaliDate();
     
     setNepalDateTime(`${englishTime} NPT`);
     setNepaliDate(nepaliDateString);
+  };
+
+  // Format currency
+  const formatCurrency = amount => {
+    return new Intl.NumberFormat('en-NP', {
+      style: 'currency',
+      currency: 'NPR',
+      minimumFractionDigits: 0,
+    }).format(amount);
   };
 
   // Function to fetch today's profit
@@ -229,7 +240,7 @@ const RetailDashboard = () => {
       const currentMonth = today.getMonth() + 1;
       const currentYear = today.getFullYear();
 
-      // Fetch all data in parallel including supplier transactions
+      // Fetch all data in parallel
       const [
         todayData,
         yesterdayData,
@@ -320,8 +331,7 @@ const RetailDashboard = () => {
       // Calculate percentage change
       let percentageChange = 0;
       if (yesterdayData.totalSales > 0) {
-        percentageChange =
-          ((todayData.totalSales - yesterdayData.totalSales) / yesterdayData.totalSales) * 100;
+        percentageChange = ((todayData.totalSales - yesterdayData.totalSales) / yesterdayData.totalSales) * 100;
       } else if (todayData.totalSales > 0) {
         percentageChange = 100;
       }
@@ -491,7 +501,7 @@ const RetailDashboard = () => {
 
       const absentToday = todaysAttendanceResponse.data?.absent || 0;
 
-      // Normalize the comparison to handle case and whitespace issues
+      // Calculate pending payments
       const transactions = pendingPaymentsResponse.data?.transactions || [];
       const calculatedTotalPending = transactions.reduce((sum, transaction) => {
         const transactionTypes = ['Refund', 'Advance', 'Credit'];
@@ -612,16 +622,64 @@ const RetailDashboard = () => {
       console.error('Error fetching dashboard data:', error);
       setIsLoading(false);
     }
+  }, []);
+
+  // Initial load effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsInitialLoad(false);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Debug effect
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    console.log('🔍 Token in dashboard:', token ? '✅ Present' : '❌ Missing');
+    console.log('🔍 Auth header set?', api.defaults.headers.common['Authorization'] ? '✅ Yes' : '❌ No');
+    console.log('🔍 Current user:', currentUser ? currentUser.email || 'Has user object' : 'No user');
+    
+    // Test a simple API call
+    const testApi = async () => {
+      try {
+        console.log('🔍 Testing API call to getTodaySales...');
+        const response = await billingAPI.getTodaySales();
+        console.log('✅ Test API call SUCCESSFUL:', response);
+      } catch (error) {
+        console.error('❌ Test API call FAILED:', error.response?.status, error.response?.data?.message);
+      }
+    };
+    
+    if (currentUser) {
+      testApi();
+    }
   }, [currentUser]);
 
+  // Data fetch effect
   useEffect(() => {
     if (!currentUser) return;
-
     fetchDashboardData();
     updateNepalTime();
-    const timeInterval = setInterval(updateNepalTime, 60000); // Update every minute
+    const timeInterval = setInterval(updateNepalTime, 60000);
     return () => clearInterval(timeInterval);
   }, [fetchDashboardData, currentUser]);
+
+  // Show loading screen during initial load or if no user
+  if (isInitialLoad || !currentUser) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        fontSize: '1.2rem',
+        color: '#4f46e5',
+        backgroundColor: '#f8fafc'
+      }}>
+        Loading dashboard...
+      </div>
+    );
+  }
 
   const todayIndex = new Date().getDay();
   const displayedDays = dashboardData.salesOverview.daysOfWeek;
@@ -661,21 +719,11 @@ const RetailDashboard = () => {
         borderWidth: 2,
         tension: 0.4,
         fill: true,
-        pointStyle: displayedDays.map((_, index) => 
-          index === todayIndex ? 'star' : 'circle'
-        ),
-        pointBackgroundColor: displayedDays.map((_, index) => 
-          index === todayIndex ? '#1f804bff' : 'rgba(79, 70, 229, 1)'
-        ),
-        pointBorderColor: displayedDays.map((_, index) => 
-          index === todayIndex ? '#15a543ff' : 'rgba(79, 70, 229, 1)'
-        ),
-        pointRadius: displayedDays.map((_, index) => 
-          index === todayIndex ? 4 : 4
-        ),
-        pointHoverRadius: displayedDays.map((_, index) => 
-          index === todayIndex ? 10 : 6
-        ),
+        pointStyle: displayedDays.map((_, index) => index === todayIndex ? 'star' : 'circle'),
+        pointBackgroundColor: displayedDays.map((_, index) => index === todayIndex ? '#1f804bff' : 'rgba(79, 70, 229, 1)'),
+        pointBorderColor: displayedDays.map((_, index) => index === todayIndex ? '#15a543ff' : 'rgba(79, 70, 229, 1)'),
+        pointRadius: displayedDays.map(() => 4),
+        pointHoverRadius: displayedDays.map((_, index) => index === todayIndex ? 10 : 6),
       },
     ],
   };
@@ -685,9 +733,7 @@ const RetailDashboard = () => {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        display: false,
-      },
+      legend: { display: false },
       tooltip: {
         callbacks: {
           label: function(context) {
@@ -703,60 +749,18 @@ const RetailDashboard = () => {
     scales: {
       y: {
         beginAtZero: true,
-        grid: {
-          color: 'rgba(0, 0, 0, 0.05)',
-        },
-        ticks: {
-          callback: function(value) {
-            return 'RS ' + value;
-          }
-        }
+        grid: { color: 'rgba(0, 0, 0, 0.05)' },
+        ticks: { callback: function(value) { return 'RS ' + value; } }
       },
-      x: {
-        grid: {
-          display: false,
-        },
-      },
-    },
-    elements: {
-      point: {
-        hoverBackgroundColor: '#10b981',
-        hoverBorderColor: '#10b981',
-        hoverBorderWidth: 2,
-      }
+      x: { grid: { display: false } }
     }
-  };
-
-  const barOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top',
-      },
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        grid: {
-          color: 'rgba(0, 0, 0, 0.05)',
-        },
-      },
-      x: {
-        grid: {
-          display: false,
-        },
-      },
-    },
   };
 
   const pieOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'bottom',
-      },
+      legend: { position: 'bottom' },
       tooltip: {
         callbacks: {
           label: function(context) {
@@ -771,134 +775,13 @@ const RetailDashboard = () => {
     cutout: '50%',
   };
 
-  // Format currency
-  const formatCurrency = amount => {
-    return new Intl.NumberFormat('en-NP', {
-      style: 'currency',
-      currency: 'NPR',
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
   // Loading skeleton
   if (isLoading) {
     return (
-      <div
-        style={{
-          padding: '1.5rem',
-          minHeight: '100vh',
-          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif",
-          backgroundColor: '#f8fafc',
-          color: '#334155',
-          lineHeight: 1.6,
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginBottom: '1.5rem',
-            flexWrap: 'wrap',
-            gap: '1rem',
-          }}
-        >
-          <div
-            style={{
-              background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-              backgroundSize: '200% 100%',
-              animation: 'loading 1.5s infinite',
-              borderRadius: '0.25rem',
-              width: '200px',
-              height: '32px',
-            }}
-          ></div>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem',
-              flexWrap: 'wrap',
-            }}
-          >
-            <div
-              style={{
-                width: '120px',
-                height: '40px',
-                borderRadius: '0.5rem',
-                background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-                backgroundSize: '200% 100%',
-                animation: 'loading 1.5s infinite',
-              }}
-            ></div>
-            <div
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-                backgroundSize: '200% 100%',
-                animation: 'loading 1.5s infinite',
-              }}
-            ></div>
-          </div>
+      <div style={{ padding: '1.5rem', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          Loading data...
         </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(12, 1fr)',
-            gap: '1.25rem',
-          }}
-        >
-          {[...Array(8)].map((_, i) => (
-            <div
-              key={i}
-              style={{
-                background: 'white',
-                borderRadius: '0.75rem',
-                padding: '1.25rem',
-                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  width: '60%',
-                  height: '24px',
-                  marginBottom: '1rem',
-                  background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'loading 1.5s infinite',
-                  borderRadius: '0.25rem',
-                }}
-              ></div>
-              <div
-                style={{
-                  width: '100%',
-                  height: '100px',
-                  background: 'linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%)',
-                  backgroundSize: '200% 100%',
-                  animation: 'loading 1.5s infinite',
-                  borderRadius: '0.5rem',
-                }}
-              ></div>
-            </div>
-          ))}
-        </div>
-
-        <style>
-          {`
-            @keyframes loading {
-              0% {
-                background-position: 200% 0;
-              }
-              100% {
-                background-position: -200% 0;
-              }
-            }
-          `}
-        </style>
       </div>
     );
   }
@@ -1313,6 +1196,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Quick Stats */}
         <div
           style={{
             gridColumn: 'span 4',
@@ -1472,6 +1356,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Finance Quick Stats */}
         <div
           style={{
             gridColumn: 'span 6',
@@ -1502,7 +1387,7 @@ const RetailDashboard = () => {
             <button
               onClick={() => {
                 fetchTodayProfit();
-                fetchDashboardData(); // Refresh outstanding dues
+                fetchDashboardData();
               }}
               style={{
                 backgroundColor: '#4f46e5',
@@ -1653,52 +1538,6 @@ const RetailDashboard = () => {
                 alignItems: 'center',
                 gap: '1rem',
                 padding: '0.75rem',
-                backgroundColor: '#f8fafc',
-                borderRadius: '0.5rem',
-              }}
-            >
-              <div
-                style={{
-                  width: '2rem',
-                  height: '2rem',
-                  borderRadius: '0.5rem',
-                  backgroundColor: '#f59e0b',
-                  color: 'white',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.875rem',
-                }}
-              >
-                <i className="fas fa-box"></i>
-              </div>
-              <div>
-                <div
-                  style={{
-                    fontSize: '0.75rem',
-                    color: '#6b7280',
-                  }}
-                >
-                  Items Sold Today
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    color: '#1f2937',
-                  }}
-                >
-                  {profitData.itemsSold} units
-                </div>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1rem',
-                padding: '0.75rem',
                 backgroundColor: '#fff7ed',
                 borderRadius: '0.5rem',
                 borderLeft: '3px solid #f59e0b',
@@ -1742,6 +1581,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Top Products Today */}
         <div
           style={{
             gridColumn: 'span 6',
@@ -1811,50 +1651,10 @@ const RetailDashboard = () => {
                 </div>
               </div>
             ))}
-            {dashboardData.topProducts.worstSeller && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '0.75rem',
-                  backgroundColor: '#fef2f2',
-                  borderRadius: '0.5rem',
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: '0.875rem',
-                      fontWeight: '500',
-                      color: '#1f2937',
-                    }}
-                  >
-                    {dashboardData.topProducts.worstSeller.name} (Worst)
-                  </div>
-                  <div
-                    style={{
-                      fontSize: '0.75rem',
-                      color: '#6b7280',
-                    }}
-                  >
-                    {dashboardData.topProducts.worstSeller.category}
-                  </div>
-                </div>
-                <div
-                  style={{
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    color: '#1f2937',
-                  }}
-                >
-                  {dashboardData.topProducts.worstSeller.quantity} sold
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
+        {/* Customer Insights */}
         <div
           style={{
             gridColumn: 'span 6',
@@ -2049,6 +1849,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Staff Performance */}
         <div
           style={{
             gridColumn: 'span 6',
@@ -2161,6 +1962,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Notifications */}
         <div
           style={{
             gridColumn: 'span 12',
@@ -2257,37 +2059,12 @@ const RetailDashboard = () => {
                     {notification.time}
                   </div>
                 </div>
-                {notification.type === 'payment' && totalPending > 0 && (
-                  <div
-                    style={{
-                      padding: '0.25rem 0.5rem',
-                      backgroundColor: '#fef3c7',
-                      color: '#92400e',
-                      borderRadius: '0.25rem',
-                      fontSize: '0.75rem',
-                      fontWeight: '600',
-                    }}
-                  >
-                    Pending
-                  </div>
-                )}
               </div>
             ))}
-            {dashboardData.notifications.length === 0 && (
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '2rem',
-                  color: '#6b7280',
-                  fontStyle: 'italic',
-                }}
-              >
-                No notifications at the moment
-              </div>
-            )}
           </div>
         </div>
 
+        {/* Category Sales */}
         <div
           style={{
             gridColumn: 'span 6',
@@ -2317,6 +2094,7 @@ const RetailDashboard = () => {
           </div>
         </div>
 
+        {/* Payment Methods */}
         <div
           style={{
             gridColumn: 'span 6',

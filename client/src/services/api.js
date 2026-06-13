@@ -17,39 +17,59 @@ if (process.env.NODE_ENV === 'development') {
     .catch(error => console.warn('API connection test failed:', error.message));
 }
 
-// Request interceptor for authentication
+// ========== REQUEST INTERCEPTOR - ATTACH TOKEN ==========
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    console.log(`🔐 Request to ${config.url}: Token attached`);
+  } else {
+    console.log(`🔓 Request to ${config.url}: No token`);
   }
   return config;
 }, (error) => {
   return Promise.reject(error);
 });
 
-// Response interceptor for error handling
+// ========== RESPONSE INTERCEPTOR - HANDLE 401 ERRORS ==========
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Log successful responses for debugging
+    if (response.config.url === '/auth/login') {
+      console.log('✅ Login successful, response contains token:', !!response.data?.token);
+    }
+    return response;
+  },
   (error) => {
-    // Only handle 401 errors, don't clear token for other errors
-    if (error.response?.status === 401) {
-      // Don't clear token if we're already on login page
-      const publicPaths = ['/login', '/signup', '/forgotpassword'];
-      const isPublicPath = publicPaths.includes(window.location.pathname);
-      
-      // Only clear token and redirect if not already on public page
-      if (!isPublicPath) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('shopSettings');
-        localStorage.removeItem('heldBills');
+    const url = error.config?.url || '';
+    const isLoginEndpoint = url.includes('/auth/login');
+    const isMeEndpoint = url.includes('/auth/me');
+    const errorMessage = error.response?.data?.message || '';
+    
+    console.log(`❌ API Error on ${url}:`, error.response?.status, errorMessage);
+    
+    // For login endpoint, just reject - don't redirect
+    if (isLoginEndpoint) {
+      return Promise.reject(error);
+    }
+    
+    // For /auth/me failures, clear session and redirect to login
+    if (error.response?.status === 401 && isMeEndpoint) {
+      console.log('🔐 Auth/me failed, clearing session');
+      localStorage.clear();
+      delete api.defaults.headers.common['Authorization'];
+      if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login';
       }
+      return Promise.reject(error);
     }
-    return Promise.reject({
-      ...error,
-      message: error.response?.data?.message || error.message
-    });
+    
+    // For all other 401 errors, just log and reject - DON'T redirect
+    if (error.response?.status === 401) {
+      console.warn(`⚠️ API endpoint ${url} returned 401, data may be unavailable`);
+    }
+    
+    return Promise.reject(error);
   }
 );
 
@@ -92,7 +112,14 @@ const clearCache = (urlPattern) => {
 // Auth API methods
 export const authAPI = {
   signup: (userData) => api.post('/auth/signup', userData).then(res => res.data),
-  login: (email, password) => api.post('/auth/login', { email, password }).then(res => res.data),
+  login: (email, password) => {
+    console.log('API.login called');
+    return api.post('/auth/login', { email, password })
+      .then(res => {
+        console.log('API.login response received');
+        return res.data;
+      });
+  },
   getMe: () => {
     const cacheKey = '/auth/me';
     const cached = getCache(cacheKey);
@@ -102,14 +129,12 @@ export const authAPI = {
     
     return api.get('/auth/me')
       .then(res => {
-        // Don't cache if there's an error
         if (res.data && res.data.success !== false) {
           setCache(cacheKey, res.data);
         }
         return res.data;
       })
       .catch(error => {
-        // Don't cache errors
         console.error('Error in getMe:', error);
         throw error;
       });
