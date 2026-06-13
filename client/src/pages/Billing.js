@@ -178,23 +178,23 @@ const Billing = () => {
       .join('<br>');
   };
 
-// Fetch QR code image from settings
-const fetchQRCodeImage = async () => {
-  try {
-    const response = await settingsAPI.getQRCodeImage();
-    if (response && response instanceof Blob && response.type.startsWith('image/')) {
-      // Create a URL for the blob image
-      const imageUrl = URL.createObjectURL(response);
-      setQrCodeImage(imageUrl);
-    } else {
-      console.log('No QR code image available yet');
+  // Fetch QR code image from settings
+  const fetchQRCodeImage = async () => {
+    try {
+      const response = await settingsAPI.getQRCodeImage();
+      if (response && response instanceof Blob && response.type.startsWith('image/')) {
+        // Create a URL for the blob image
+        const imageUrl = URL.createObjectURL(response);
+        setQrCodeImage(imageUrl);
+      } else {
+        console.log('No QR code image available yet');
+        setQrCodeImage('');
+      }
+    } catch (error) {
+      console.log('QR code not available - generate one in settings first');
       setQrCodeImage('');
     }
-  } catch (error) {
-    console.log('QR code not available - generate one in settings first');
-    setQrCodeImage('');
-  }
-};
+  };
 
   // Fetch products
   const fetchProducts = async () => {
@@ -272,16 +272,25 @@ const fetchQRCodeImage = async () => {
     }
   };
 
-  // Add to cart
+  // Add to cart - FIXED: Ensure product ID is preserved
   const addToCart = (product) => {
     if (product.stock <= 0) {
       setError('Product is out of stock');
       return;
     }
     
+    // Ensure we have both id and _id
+    const productId = product._id || product.id;
+    if (!productId) {
+      setError('Invalid product: missing ID');
+      return;
+    }
+    
     // If pricing mode is variable, allow price editing
     const cartItem = {
       ...product,
+      _id: productId,  // Ensure _id is set
+      id: productId,   // Ensure id is set
       quantity: 1,
       discount: 0,
       // Store the original price separately for reference
@@ -292,8 +301,11 @@ const fetchQRCodeImage = async () => {
       remarks: product.price === 0 ? '' : undefined
     };
     
-    const existingItemIndex = cart.findIndex(item => item._id === product._id && 
-      item.size === product.size && item.color === product.color);
+    const existingItemIndex = cart.findIndex(item => 
+      (item._id === productId || item.id === productId) && 
+      item.size === product.size && 
+      item.color === product.color
+    );
     
     if (existingItemIndex >= 0) {
       const updatedCart = [...cart];
@@ -415,7 +427,7 @@ const fetchQRCodeImage = async () => {
     }
   };
 
-  // Save bill to Firebase and update stock
+  // Save bill to Firebase and update stock - FIXED: Handle product ID correctly
   const saveBill = async () => {
     try {
       setLoading(true);
@@ -425,21 +437,35 @@ const fetchQRCodeImage = async () => {
         ...currentBill,
         items: currentBill.items.map(item => ({
           ...item,
-          productId: item._id, // Ensure productId is included
+          productId: item._id || item.id, // Check both _id and id
           stockAtTimeOfSale: item.stock // Capture stock at time of sale
         }))
       };
+      
+      console.log('Saving bill with items:', billData.items.map(i => ({ 
+        id: i.productId, 
+        name: i.name,
+        stock: i.stock,
+        quantity: i.quantity
+      })));
       
       // Save bill to database
       const response = await billingAPI.createBill(billData);
       
       if (response && response.success) {
         // Update product stock in database
-        const updatePromises = currentBill.items.map(item => 
-          inventoryAPI.updateProduct(item._id, { 
-            stock: item.stock - item.quantity 
-          })
-        );
+        const updatePromises = currentBill.items.map(item => {
+          const productId = item._id || item.id;
+          if (!productId) {
+            console.error('No product ID found for item:', item);
+            return Promise.resolve();
+          }
+          const newStock = item.stock - item.quantity;
+          console.log(`Updating product ${productId} stock from ${item.stock} to ${newStock}`);
+          return inventoryAPI.updateProduct(productId, { 
+            stock: newStock 
+          });
+        });
         
         await Promise.all(updatePromises);
         
@@ -500,7 +526,6 @@ const fetchQRCodeImage = async () => {
           <title>Bill ${currentBill.billNumber}</title>
           <meta charset="utf-8">
           <style>
-            /* Modern Receipt Styles */
             body {
               font-family: 'Courier New', monospace;
               margin: 0;
@@ -510,82 +535,69 @@ const fetchQRCodeImage = async () => {
               line-height: 1.4;
               font-size: 12px;
             }
-            
             .receipt-container {
               max-width: 280px;
               margin: 0 auto;
             }
-            
             .header {
               text-align: center;
               margin-bottom: 15px;
               padding-bottom: 10px;
               border-bottom: 1px dashed #ccc;
             }
-            
             .shop-name {
               font-weight: bold;
               font-size: 16px;
               margin-bottom: 5px;
               text-transform: uppercase;
             }
-            
             .shop-info {
               font-size: 10px;
               margin-bottom: 3px;
             }
-            
             .bill-meta {
               display: flex;
               justify-content: space-between;
               margin: 10px 0;
               font-size: 11px;
             }
-            
             .items-table {
               width: 100%;
               border-collapse: collapse;
               margin: 10px 0;
             }
-            
             .items-table th {
               text-align: left;
               border-bottom: 1px solid #000;
               padding: 5px 0;
               font-weight: bold;
             }
-            
             .items-table td {
               padding: 6px 0;
               border-bottom: 1px dashed #eee;
               vertical-align: top;
             }
-            
             .item-details {
               font-size: 10px;
               color: #666;
               margin-top: 2px;
             }
-            
             .item-remarks {
               font-size: 10px;
               color: #e74c3c;
               font-style: italic;
               margin-top: 2px;
             }
-            
             .summary {
               margin-top: 15px;
               border-top: 1px dashed #ccc;
               padding-top: 10px;
             }
-            
             .summary-row {
               display: flex;
               justify-content: space-between;
               margin: 5px 0;
             }
-            
             .grand-total {
               font-weight: bold;
               border-top: 2px solid #000;
@@ -593,7 +605,6 @@ const fetchQRCodeImage = async () => {
               margin-top: 8px;
               font-size: 14px;
             }
-            
             .payment-method {
               text-align: center;
               margin: 15px 0;
@@ -602,7 +613,6 @@ const fetchQRCodeImage = async () => {
               border-radius: 4px;
               font-weight: bold;
             }
-            
             .qr-section {
               text-align: center;
               margin: 15px 0;
@@ -610,38 +620,32 @@ const fetchQRCodeImage = async () => {
               border: 1px dashed #ccc;
               border-radius: 5px;
             }
-            
             .qr-title {
               font-weight: bold;
               margin-bottom: 5px;
               font-size: 11px;
             }
-            
             .qr-content {
               font-size: 10px;
               margin: 5px 0;
               line-height: 1.2;
             }
-            
             .thank-you {
               text-align: center;
               margin-top: 15px;
               font-style: italic;
               font-weight: bold;
             }
-            
             .footer {
               text-align: center;
               margin-top: 10px;
               font-size: 10px;
               color: #666;
             }
-            
             @media print {
               body {
                 padding: 10px;
               }
-              
               .no-print {
                 display: none;
               }
@@ -743,7 +747,6 @@ const fetchQRCodeImage = async () => {
                   <div style="display: flex; justify-content: center; margin: 10px 0;">
                     <svg height="100" width="100" viewBox="0 0 410 410">
                       <rect fill="#ffffff" height="100%" width="100%"/>
-                      ${generateQRCodePath(currentBill.qrCodeContent)}
                     </svg>
                   </div>
                 `}
@@ -767,46 +770,12 @@ const fetchQRCodeImage = async () => {
             <button onclick="window.print()">Print Receipt</button>
             <button onclick="window.close()">Close</button>
           </div>
-          
-          <script>
-            window.onload = function() {
-              // Auto-print if needed
-              // window.print();
-            };
-          </script>
         </body>
       </html>
     `;
     
     printWindow.document.write(printContent);
     printWindow.document.close();
-  };
-
-  // Helper function to generate QR code path
-  const generateQRCodePath = (content) => {
-    // This is a simplified version - in a real implementation, you would use a QR code library
-    // that can generate the proper path based on the content
-    // For now, we'll use a static pattern that resembles a QR code
-    
-    // Hash the content to create a deterministic pattern
-    let hash = 0;
-    for (let i = 0; i < content.length; i++) {
-      hash = ((hash << 5) - hash) + content.charCodeAt(i);
-      hash |= 0; // Convert to 32bit integer
-    }
-    
-    // Use the hash to create a pattern
-    const pattern = [];
-    for (let i = 0; i < 41; i++) {
-      for (let j = 0; j < 41; j++) {
-        // Create a pattern based on the hash
-        if ((i + j + hash) % 5 === 0 || (i * j + hash) % 7 === 0) {
-          pattern.push(`<rect fill="#000000" height="10" width="10" x="${i * 10}" y="${j * 10}"/>`);
-        }
-      }
-    }
-    
-    return pattern.join('');
   };
 
   // Combined function to print and save
@@ -881,39 +850,39 @@ const fetchQRCodeImage = async () => {
   };
 
   // Fetch products and settings on component mount
-useEffect(() => {
-  fetchProducts();
-  loadHeldBills();
-  loadShopSettings();
-  fetchQRCodeImage();
-  
-  // Listen for settings updates
-  const handleSettingsUpdate = (event) => {
-    const settings = event.detail;
-    setVatRegistered(settings.vatEnabled || false);
-    setVatRate(settings.vatRate || 0);
-    setPricingMode(settings.pricingMode || 'fixed');
-    
-    const shopInfo = settings.shopInfo || {};
-    setShopName(shopInfo.name || 'My Shop');
-    setShopInfo(shopInfo);
-    
-    const qrContent = generateQRContent(shopInfo);
-    setQrCodeContent(qrContent);
-    
+  useEffect(() => {
+    fetchProducts();
+    loadHeldBills();
+    loadShopSettings();
     fetchQRCodeImage();
-  };
+    
+    // Listen for settings updates
+    const handleSettingsUpdate = (event) => {
+      const settings = event.detail;
+      setVatRegistered(settings.vatEnabled || false);
+      setVatRate(settings.vatRate || 0);
+      setPricingMode(settings.pricingMode || 'fixed');
+      
+      const shopInfo = settings.shopInfo || {};
+      setShopName(shopInfo.name || 'My Shop');
+      setShopInfo(shopInfo);
+      
+      const qrContent = generateQRContent(shopInfo);
+      setQrCodeContent(qrContent);
+      
+      fetchQRCodeImage();
+    };
 
-  window.addEventListener('settingsUpdated', handleSettingsUpdate);
+    window.addEventListener('settingsUpdated', handleSettingsUpdate);
 
-  return () => {
-    window.removeEventListener('settingsUpdated', handleSettingsUpdate);
-    // Clean up blob URL when component unmounts
-    if (qrCodeImage) {
-      URL.revokeObjectURL(qrCodeImage);
-    }
-  };
-}, []);
+    return () => {
+      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+      // Clean up blob URL when component unmounts
+      if (qrCodeImage) {
+        URL.revokeObjectURL(qrCodeImage);
+      }
+    };
+  }, []);
 
   // Validate cart whenever it changes
   useEffect(() => {
@@ -1044,7 +1013,7 @@ useEffect(() => {
             ) : (
               filteredProducts.map(product => (
                 <div 
-                  key={product._id} 
+                  key={product._id || product.id} 
                   className={`product-card ${product.stock <= 0 ? 'out-of-stock' : ''} ${product.stock <= (product.lowStockAlert || 5) ? 'low-stock' : ''}`}
                   onClick={() => product.stock > 0 && addToCart(product)}
                 >
@@ -1298,7 +1267,7 @@ useEffect(() => {
           setPaymentMethod={setPaymentMethod}
           onClose={() => setIsPaymentModalOpen(false)}
           onConfirm={handlePaymentConfirm}
-          customer={customer} // Pass customer prop
+          customer={customer}
         />
       )}
 
@@ -1418,7 +1387,7 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
   useEffect(() => {
     if (customer) {
       setPaymentMethod('credit');
-      setSplitPayment(false); // Disable split payment when customer is selected
+      setSplitPayment(false);
     } else {
       setPaymentMethod('cash');
     }
@@ -1449,7 +1418,6 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
     let payment;
     
     if (splitPayment) {
-      // For split payment (full payment assumed, no credit in split)
       payment = {
         type: 'split',
         methods: splitMethods.map(m => ({ method: m.method, amount: m.amount })),
@@ -1459,7 +1427,6 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
       };
     } else {
       if (paymentMethod === 'credit') {
-        // For credit
         payment = {
           type: 'single',
           methods: [{ method: 'credit', amount: grandTotal }],
@@ -1468,7 +1435,6 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
           outstandingAmount: grandTotal
         };
       } else {
-        // For single non-credit
         payment = {
           type: 'single',
           methods: [{ method: paymentMethod, amount: amountPaid }],
@@ -1501,7 +1467,7 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
                 type="checkbox"
                 checked={splitPayment}
                 onChange={e => setSplitPayment(e.target.checked)}
-                disabled={paymentMethod === 'credit'} // Disable split payment when credit is selected
+                disabled={paymentMethod === 'credit'}
               />
               Split Payment
             </label>
@@ -1517,7 +1483,7 @@ const PaymentModal = ({ grandTotal, paymentMethod, setPaymentMethod, onClose, on
                 <option value="cash">Cash</option>
                 <option value="card">Card</option>
                 <option value="ewallet">E-Wallet</option>
-                {customer && <option value="credit">Credit</option>} {/* Show credit option only if customer is selected */}
+                {customer && <option value="credit">Credit</option>}
               </select>
               
               {paymentMethod !== 'credit' && (
@@ -1803,7 +1769,6 @@ const ReceiptModal = ({ bill, onClose, onSave, onPrintAndSave, isPrintPreview, s
               )}
             </div>
             
-            {/* QR Code Section - Using the QR code from settings */}
             {qrCodeContent && (
               <div className="receipt-qr">
                 <div className="qr-title">QR CODE</div>
