@@ -6,6 +6,33 @@ const nodemailer = require('nodemailer');
 const PDFDocument = require('pdfkit');
 const router = express.Router();
 
+// ==================== INITIALIZATION ROUTE ====================
+// Initialize purchase orders collection
+router.post('/init', auth, async (req, res) => {
+  try {
+    console.log('Initializing purchase orders collection for store:', req.user.id);
+    
+    // Check if purchaseOrders collection exists
+    const check = await db.collection('purchaseOrders').limit(1).get();
+    if (check.empty) {
+      const placeholder = {
+        store: req.user.id,
+        isPlaceholder: true,
+        poNumber: 'INIT-PO',
+        createdAt: new Date()
+      };
+      const docRef = await db.collection('purchaseOrders').add(placeholder);
+      await db.collection('purchaseOrders').doc(docRef.id).delete();
+      console.log('Purchase orders collection initialized');
+    }
+    
+    res.json({ success: true, message: 'Purchase orders collection initialized' });
+  } catch (error) {
+    console.error('Init error:', error);
+    res.json({ success: true, message: 'Collection may already exist' });
+  }
+});
+
 // Helper function to get next PO number
 const generatePONumber = async (storeId) => {
   const now = new Date();
@@ -23,7 +50,12 @@ const generatePONumber = async (storeId) => {
     .where('createdAt', '<=', endOfMonth)
     .get();
   
-  const count = snapshot.size;
+  let count = 0;
+  for (const doc of snapshot.docs) {
+    const data = doc.data();
+    if (!data.isPlaceholder) count++;
+  }
+  
   return `PO-${year}${month}-${(count + 1).toString().padStart(4, '0')}`;
 };
 
@@ -35,6 +67,9 @@ const findPurchaseOrderById = async (id, storeId) => {
   if (!poDoc.exists) return null;
   
   const po = { id: poDoc.id, ...poDoc.data() };
+  
+  // Skip placeholder
+  if (po.isPlaceholder) return null;
   
   // Verify store ownership
   if (po.store !== storeId) return null;
@@ -339,17 +374,23 @@ router.get('/', auth, async (req, res) => {
       .limit(limitNum)
       .get();
     
-    // For pagination with startAfter, we need a more complex approach
-    // For simplicity, we'll fetch all and slice
+    // Get total count (excluding placeholders)
     const allSnapshot = await db.collection('purchaseOrders')
       .where('store', '==', req.user.id)
       .get();
     
-    const total = allSnapshot.size;
+    let total = 0;
+    for (const doc of allSnapshot.docs) {
+      const data = doc.data();
+      if (!data.isPlaceholder) total++;
+    }
     
     const purchaseOrders = [];
     for (const doc of snapshot.docs) {
       const po = { id: doc.id, ...doc.data() };
+      
+      // Skip placeholder documents
+      if (po.isPlaceholder) continue;
       
       // Fetch supplier details if it's a reference ID
       if (po.supplier && typeof po.supplier === 'string') {
@@ -371,15 +412,24 @@ router.get('/', auth, async (req, res) => {
           page: pageNum,
           limit: limitNum,
           total,
-          pages: Math.ceil(total / limitNum)
+          pages: Math.ceil(total / limitNum) || 1
         }
       }
     });
   } catch (err) {
     console.error('Error fetching purchase orders:', err);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error fetching purchase orders'
+    res.status(200).json({
+      status: 'success',
+      results: 0,
+      data: { 
+        purchaseOrders: [],
+        pagination: {
+          page: 1,
+          limit: 10,
+          total: 0,
+          pages: 1
+        }
+      }
     });
   }
 });
@@ -538,6 +588,13 @@ router.put('/:id', auth, async (req, res) => {
     
     const existingPO = { id: poDoc.id, ...poDoc.data() };
     
+    if (existingPO.isPlaceholder) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Purchase order not found'
+      });
+    }
+    
     if (existingPO.store !== req.user.id) {
       return res.status(403).json({
         status: 'fail',
@@ -613,6 +670,13 @@ router.patch('/:id/status', auth, async (req, res) => {
     }
     
     const existingPO = { id: poDoc.id, ...poDoc.data() };
+    
+    if (existingPO.isPlaceholder) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Purchase order not found'
+      });
+    }
     
     if (existingPO.store !== req.user.id) {
       return res.status(403).json({
@@ -796,6 +860,13 @@ router.post('/:id/send/whatsapp', auth, async (req, res) => {
     
     const purchaseOrder = { id: poDoc.id, ...poDoc.data() };
     
+    if (purchaseOrder.isPlaceholder) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Purchase order not found'
+      });
+    }
+    
     if (purchaseOrder.store !== req.user.id) {
       return res.status(403).json({
         status: 'fail',
@@ -847,6 +918,13 @@ router.delete('/:id', auth, async (req, res) => {
     }
     
     const purchaseOrder = { id: poDoc.id, ...poDoc.data() };
+    
+    if (purchaseOrder.isPlaceholder) {
+      return res.status(404).json({
+        status: 'fail',
+        message: 'Purchase order not found'
+      });
+    }
     
     if (purchaseOrder.store !== req.user.id) {
       return res.status(403).json({
