@@ -47,25 +47,31 @@ const hasRelatedRecords = async (staffId, storeId) => {
   }
 };
 
-// Get all staff with filtering and pagination
+// Get all staff with filtering and pagination - FIXED VERSION
 exports.getAllStaff = async (req, res) => {
   try {
+    console.log('=== GETTING STAFF FOR STORE:', req.user.id);
+    
     const { page = 1, limit = 10, search, position, status } = req.query;
     
+    // Get ALL staff without ordering first (to debug)
     let query = db.collection('staff')
       .where('store', '==', req.user.id);
     
-    const snapshot = await query
-      .orderBy('createdAt', 'desc')
-      .limit(parseInt(limit))
-      .get();
+    const snapshot = await query.get();
+    
+    console.log('Raw snapshot size:', snapshot.size);
     
     const staff = [];
     for (const doc of snapshot.docs) {
       let staffMember = { id: doc.id, ...doc.data() };
+      console.log('Found staff:', staffMember.name, 'Position:', staffMember.position, 'Placeholder:', staffMember.isPlaceholder);
       
       // Skip placeholder documents
-      if (staffMember.isPlaceholder) continue;
+      if (staffMember.isPlaceholder) {
+        console.log('Skipping placeholder:', staffMember.name);
+        continue;
+      }
       
       // Apply filters in memory
       if (search) {
@@ -81,29 +87,28 @@ exports.getAllStaff = async (req, res) => {
       staff.push(staffMember);
     }
     
-    const totalSnapshot = await db.collection('staff')
-      .where('store', '==', req.user.id)
-      .get();
+    // Apply pagination
+    const startIndex = (parseInt(page) - 1) * parseInt(limit);
+    const paginatedStaff = staff.slice(startIndex, startIndex + parseInt(limit));
     
-    let total = 0;
-    for (const doc of totalSnapshot.docs) {
-      const data = doc.data();
-      if (!data.isPlaceholder) total++;
-    }
+    const total = staff.length;
+    
+    console.log('Final staff count:', total);
     
     res.status(200).json({
       success: true,
       data: {
-        staff,
+        staff: paginatedStaff,
         pagination: {
           current: parseInt(page),
-          pages: Math.ceil(total / limit) || 1,
+          pages: Math.ceil(total / parseInt(limit)) || 1,
           total
         }
       }
     });
   } catch (err) {
     console.error('Error fetching staff:', err.message);
+    console.error('Error stack:', err.stack);
     // Return empty data instead of error
     res.status(200).json({
       success: true,
