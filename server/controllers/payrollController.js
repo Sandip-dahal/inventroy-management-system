@@ -3,13 +3,20 @@ const { FieldValue } = require('firebase-admin/firestore');
 
 // Helper function to find staff by ID and store
 const findStaffById = async (id, storeId) => {
-  const staffRef = db.collection('staff').doc(id);
-  const staffDoc = await staffRef.get();
-  
-  if (!staffDoc.exists) return null;
-  const staff = { id: staffDoc.id, ...staffDoc.data() };
-  if (staff.store !== storeId) return null;
-  return staff;
+  if (!id) return null;
+  try {
+    const staffRef = db.collection('staff').doc(id);
+    const staffDoc = await staffRef.get();
+    
+    if (!staffDoc.exists) return null;
+    const staff = { id: staffDoc.id, ...staffDoc.data() };
+    if (staff.store !== storeId) return null;
+    if (staff.isPlaceholder) return null;
+    return staff;
+  } catch (err) {
+    console.error('Error in findStaffById:', err.message);
+    return null;
+  }
 };
 
 // Get payroll records
@@ -35,11 +42,23 @@ exports.getPayrolls = async (req, res) => {
     const payrolls = [];
     for (const doc of snapshot.docs) {
       const payroll = { id: doc.id, ...doc.data() };
+      // Skip placeholder documents
+      if (payroll.isPlaceholder) continue;
       
       // Fetch staff details
-      const staff = await findStaffById(payroll.staffId, req.user.id);
-      if (staff) {
-        payroll.staff = { id: staff.id, name: staff.name, position: staff.position, email: staff.email, phone: staff.phone };
+      try {
+        const staff = await findStaffById(payroll.staffId, req.user.id);
+        if (staff && !staff.isPlaceholder) {
+          payroll.staff = { 
+            id: staff.id, 
+            name: staff.name, 
+            position: staff.position, 
+            email: staff.email, 
+            phone: staff.phone 
+          };
+        }
+      } catch (staffErr) {
+        console.error('Error fetching staff for payroll:', staffErr.message);
       }
       
       payrolls.push(payroll);
@@ -48,21 +67,28 @@ exports.getPayrolls = async (req, res) => {
     const totalSnapshot = await db.collection('payrolls')
       .where('store', '==', req.user.id)
       .get();
-    const total = totalSnapshot.size;
+    
+    let total = 0;
+    for (const doc of totalSnapshot.docs) {
+      const data = doc.data();
+      if (!data.isPlaceholder) total++;
+    }
     
     res.json({
       success: true,
       payrolls,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit) || 1,
       currentPage: parseInt(page),
       total
     });
   } catch (error) {
-    console.error('Error fetching payrolls:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching payrolls',
-      error: error.message
+    console.error('Error fetching payrolls:', error.message);
+    res.json({
+      success: true,
+      payrolls: [],
+      totalPages: 0,
+      currentPage: 1,
+      total: 0
     });
   }
 };
@@ -250,7 +276,6 @@ exports.updatePayrollStatus = async (req, res) => {
 };
 
 // Get payroll summary
-// Get payroll summary with proper handling of empty data
 exports.getPayrollSummary = async (req, res) => {
   try {
     const { month, year } = req.query;
@@ -275,6 +300,9 @@ exports.getPayrollSummary = async (req, res) => {
     for (const doc of snapshot.docs) {
       const payroll = { id: doc.id, ...doc.data() };
       
+      // Skip placeholder
+      if (payroll.isPlaceholder) continue;
+      
       // Convert dates if they exist
       if (payroll.createdAt && payroll.createdAt.toDate) {
         payroll.createdAt = payroll.createdAt.toDate();
@@ -288,19 +316,25 @@ exports.getPayrollSummary = async (req, res) => {
       
       // Fetch staff details
       if (payroll.staffId) {
-        const staffRef = db.collection('staff').doc(payroll.staffId);
-        const staffDoc = await staffRef.get();
-        if (staffDoc.exists) {
-          const staffData = staffDoc.data();
-          payroll.staff = {
-            _id: staffDoc.id,
-            id: staffDoc.id,
-            name: staffData.name,
-            position: staffData.position,
-            email: staffData.email,
-            phone: staffData.phone
-          };
-          uniqueStaffIds.add(payroll.staffId);
+        try {
+          const staffRef = db.collection('staff').doc(payroll.staffId);
+          const staffDoc = await staffRef.get();
+          if (staffDoc.exists) {
+            const staffData = staffDoc.data();
+            if (!staffData.isPlaceholder) {
+              payroll.staff = {
+                _id: staffDoc.id,
+                id: staffDoc.id,
+                name: staffData.name,
+                position: staffData.position,
+                email: staffData.email,
+                phone: staffData.phone
+              };
+              uniqueStaffIds.add(payroll.staffId);
+            }
+          }
+        } catch (staffErr) {
+          console.error('Error fetching staff:', staffErr.message);
         }
       }
       
@@ -311,7 +345,6 @@ exports.getPayrollSummary = async (req, res) => {
       totalDeductions += payroll.deduction || 0;
     }
     
-    // If no payroll data, return zeros instead of error
     res.status(200).json({
       success: true,
       data: {
@@ -331,8 +364,7 @@ exports.getPayrollSummary = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Error fetching payroll summary:', err);
-    // Return empty data instead of error
+    console.error('Error fetching payroll summary:', err.message);
     res.status(200).json({
       success: true,
       data: {
@@ -378,6 +410,9 @@ exports.checkPayrollExists = async (req, res) => {
     if (exists) {
       const doc = snapshot.docs[0];
       payroll = { id: doc.id, ...doc.data() };
+      if (payroll.isPlaceholder) {
+        return res.json({ success: true, exists: false, payroll: null });
+      }
     }
     
     res.json({
@@ -410,6 +445,13 @@ exports.getPayrollById = async (req, res) => {
     
     const payroll = { id: payrollDoc.id, ...payrollDoc.data() };
     
+    if (payroll.isPlaceholder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payroll not found'
+      });
+    }
+    
     if (payroll.store !== req.user.id) {
       return res.status(403).json({
         success: false,
@@ -418,7 +460,7 @@ exports.getPayrollById = async (req, res) => {
     }
     
     const staff = await findStaffById(payroll.staffId, req.user.id);
-    if (staff) {
+    if (staff && !staff.isPlaceholder) {
       payroll.staff = { id: staff.id, name: staff.name, position: staff.position, email: staff.email, phone: staff.phone };
     }
     

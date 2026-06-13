@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
+const { db } = require('../firebase');
 const staffController = require('../controllers/staffController');
 const attendanceController = require('../controllers/attendanceController');
 const payrollController = require('../controllers/payrollController');
@@ -28,6 +29,7 @@ router.post('/init', auth, async (req, res) => {
       };
       const docRef = await db.collection('staff').add(placeholder);
       await db.collection('staff').doc(docRef.id).delete();
+      console.log('Staff collection initialized');
     }
     
     // Check payrolls collection
@@ -41,6 +43,7 @@ router.post('/init', auth, async (req, res) => {
       };
       const payrollRef = await db.collection('payrolls').add(payrollPlaceholder);
       await db.collection('payrolls').doc(payrollRef.id).delete();
+      console.log('Payrolls collection initialized');
     }
     
     // Check attendance collection
@@ -54,6 +57,7 @@ router.post('/init', auth, async (req, res) => {
       };
       const attendanceRef = await db.collection('attendance').add(attendancePlaceholder);
       await db.collection('attendance').doc(attendanceRef.id).delete();
+      console.log('Attendance collection initialized');
     }
     
     // Check leaves collection
@@ -67,6 +71,7 @@ router.post('/init', auth, async (req, res) => {
       };
       const leavesRef = await db.collection('leaves').add(leavesPlaceholder);
       await db.collection('leaves').doc(leavesRef.id).delete();
+      console.log('Leaves collection initialized');
     }
     
     res.json({ 
