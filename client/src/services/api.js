@@ -924,6 +924,7 @@ export const leaveAPI = {
 };
 
 // Settings API methods
+// Settings API methods
 export const settingsAPI = {
   getSettings: () => {
     const cacheKey = '/settings';
@@ -940,19 +941,38 @@ export const settingsAPI = {
         throw error;
       });
   },
-  getQRCodeImage: () => api.get('/settings/qr-code/image', { 
-    responseType: 'blob' 
-  })
-    .then(res => {
-      if (res.status === 200) {
-        return res.data;
+  
+  // FIXED: Get QR code image with proper error handling
+  getQRCodeImage: async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available for QR code fetch');
+        return null;
       }
-      throw new Error('Failed to fetch QR code image');
-    })
-    .catch(error => {
-      console.error('Error fetching QR code image:', error);
-      throw error;
-    }),
+      
+      const response = await api.get('/settings/qr-code/image', { 
+        responseType: 'blob'
+      });
+      
+      // Check if response is a valid image blob
+      if (response.data && response.data instanceof Blob && response.data.type && response.data.type.startsWith('image/')) {
+        return response.data;
+      } else {
+        console.log('QR code image not available yet');
+        return null;
+      }
+    } catch (error) {
+      // Don't throw error - just return null and log
+      if (error.response?.status === 404) {
+        console.log('QR code not found - generate one in settings first');
+      } else {
+        console.error('Error fetching QR code image:', error.message);
+      }
+      return null;
+    }
+  },
+  
   updateQRCode: (qrData) => {
     clearCache('/settings');
     return api.post('/settings/qr-code', qrData)

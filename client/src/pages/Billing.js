@@ -178,21 +178,23 @@ const Billing = () => {
       .join('<br>');
   };
 
-  // Fetch QR code image from settings
-  const fetchQRCodeImage = async () => {
-    try {
-      const response = await settingsAPI.getQRCodeImage();
-      if (response) {
-        // Create a URL for the blob image
-        const imageUrl = URL.createObjectURL(response);
-        setQrCodeImage(imageUrl);
-      }
-    } catch (error) {
-      console.error('Error fetching QR code image:', error);
-      // Fallback to text QR code if image is not available
+// Fetch QR code image from settings
+const fetchQRCodeImage = async () => {
+  try {
+    const response = await settingsAPI.getQRCodeImage();
+    if (response && response instanceof Blob && response.type.startsWith('image/')) {
+      // Create a URL for the blob image
+      const imageUrl = URL.createObjectURL(response);
+      setQrCodeImage(imageUrl);
+    } else {
+      console.log('No QR code image available yet');
       setQrCodeImage('');
     }
-  };
+  } catch (error) {
+    console.log('QR code not available - generate one in settings first');
+    setQrCodeImage('');
+  }
+};
 
   // Fetch products
   const fetchProducts = async () => {
@@ -879,42 +881,39 @@ const Billing = () => {
   };
 
   // Fetch products and settings on component mount
-  useEffect(() => {
-    fetchProducts();
-    loadHeldBills();
-    loadShopSettings();
-    fetchQRCodeImage();
+useEffect(() => {
+  fetchProducts();
+  loadHeldBills();
+  loadShopSettings();
+  fetchQRCodeImage();
+  
+  // Listen for settings updates
+  const handleSettingsUpdate = (event) => {
+    const settings = event.detail;
+    setVatRegistered(settings.vatEnabled || false);
+    setVatRate(settings.vatRate || 0);
+    setPricingMode(settings.pricingMode || 'fixed');
     
-    // Listen for settings updates
-    const handleSettingsUpdate = (event) => {
-      const settings = event.detail;
-      setVatRegistered(settings.vatEnabled || false);
-      setVatRate(settings.vatRate || 0);
-      setPricingMode(settings.pricingMode || 'fixed');
-      
-      // Set shop info with proper defaults
-      const shopInfo = settings.shopInfo || {};
-      setShopName(shopInfo.name || 'My Shop');
-      setShopInfo(shopInfo);
-      
-      // Generate QR code content from shop info
-      const qrContent = generateQRContent(shopInfo);
-      setQrCodeContent(qrContent);
-      
-      // Fetch QR code image when settings are updated
-      fetchQRCodeImage();
-    };
+    const shopInfo = settings.shopInfo || {};
+    setShopName(shopInfo.name || 'My Shop');
+    setShopInfo(shopInfo);
+    
+    const qrContent = generateQRContent(shopInfo);
+    setQrCodeContent(qrContent);
+    
+    fetchQRCodeImage();
+  };
 
-    window.addEventListener('settingsUpdated', handleSettingsUpdate);
+  window.addEventListener('settingsUpdated', handleSettingsUpdate);
 
-    return () => {
-      window.removeEventListener('settingsUpdated', handleSettingsUpdate);
-      // Clean up blob URL when component unmounts
-      if (qrCodeImage) {
-        URL.revokeObjectURL(qrCodeImage);
-      }
-    };
-  }, []);
+  return () => {
+    window.removeEventListener('settingsUpdated', handleSettingsUpdate);
+    // Clean up blob URL when component unmounts
+    if (qrCodeImage) {
+      URL.revokeObjectURL(qrCodeImage);
+    }
+  };
+}, []);
 
   // Validate cart whenever it changes
   useEffect(() => {
