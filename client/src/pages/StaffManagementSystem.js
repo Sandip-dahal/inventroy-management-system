@@ -4,8 +4,9 @@ import {
   FaUsers, FaCalendarCheck, FaMoneyBillWave, FaUserPlus, 
   FaSearch, FaEdit, FaTrash, FaHome, FaChartLine, FaCog,
   FaTimes, FaCheck, FaClock, FaSave, FaBuilding, FaIdCard,
-  FaFileInvoiceDollar, FaCalculator, FaMoneyCheckAlt,FaInfoCircle, FaShieldAlt, FaUsersCog, FaCalendarAlt, 
-  FaUserCheck, FaExclamationTriangle, FaSyncAlt
+  FaFileInvoiceDollar, FaCalculator, FaMoneyCheckAlt, FaInfoCircle, 
+  FaShieldAlt, FaUsersCog, FaCalendarAlt, FaUserCheck, 
+  FaExclamationTriangle, FaSyncAlt
 } from 'react-icons/fa';
 import { FaListCheck } from 'react-icons/fa6';
 import { staffAPI, attendanceAPI, payrollAPI } from '../services/api';
@@ -18,7 +19,7 @@ const formatTo12Hour = (time24) => {
   if (!time24 || !/^\d{2}:\d{2}$/.test(time24)) return '';
   const [hours, minutes] = time24.split(':').map(Number);
   const period = hours >= 12 ? 'PM' : 'AM';
-  const hours12 = hours % 12 || 12; // Convert 0 to 12 for midnight
+  const hours12 = hours % 12 || 12;
   return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`;
 };
 
@@ -38,8 +39,17 @@ const isPastClosingTime = (currentTime, closingTime) => {
   const currentTotalMinutes = currentHours * 60 + currentMinutes;
   const closingTotalMinutes = closingHours * 60 + closingMinutes;
   
-  // Handle overnight scenarios (if closing time is before opening time)
   return currentTotalMinutes >= closingTotalMinutes;
+};
+
+// Helper function to get staff ID (handles both _id and id)
+const getStaffId = (staff) => {
+  return staff?._id || staff?.id || null;
+};
+
+// Helper function to get attendance staff ID
+const getAttendanceStaffId = (attendance) => {
+  return attendance?.staff?._id || attendance?.staff?.id || attendance?.staffId || null;
 };
 
 const StaffManagementSystem = () => {
@@ -112,7 +122,6 @@ const StaffManagementSystem = () => {
   // Add refs to prevent infinite loops
   const isMountedRef = useRef(true);
   const attendanceFetchRef = useRef(0);
-  const autoAbsentRef = useRef(null); // For auto-absent timer
   
   // Get current time in Nepal (24-hour format for input)
   const getCurrentTime = () => {
@@ -128,7 +137,7 @@ const StaffManagementSystem = () => {
   
   const getTodayDate = () => {
     const now = new Date();
-    const offset = 5 * 60 + 45; // Nepal is UTC+5:45
+    const offset = 5 * 60 + 45;
     const localDate = new Date(now.getTime() + offset * 60 * 1000);
     return localDate.toISOString().split('T')[0];
   };
@@ -177,8 +186,7 @@ const StaffManagementSystem = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedPayrollSearchTerm(payrollSearchTerm);
-    }, 500); // 500ms delay
-
+    }, 500);
     return () => clearTimeout(timer);
   }, [payrollSearchTerm]);
 
@@ -186,12 +194,11 @@ const StaffManagementSystem = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedAttendanceSearchTerm(attendanceSearchTerm);
-    }, 500); // 500ms delay
-
+    }, 500);
     return () => clearTimeout(timer);
   }, [attendanceSearchTerm]);
 
-  // Auto-absent marking functionality
+  // Auto-absent marking functionality - FIXED
   const markUnmarkedStaffAsAbsent = useCallback(async () => {
     if (!isMountedRef.current || autoAbsentProcessed || staffSettingsLoading || !staffSettings.closingTime) {
       return;
@@ -210,10 +217,14 @@ const StaffManagementSystem = () => {
       }
 
       // Get staff who don't have attendance marked for today
-      const unmarkedStaff = staffData.filter(staff => 
-        staff.status === 'active' && 
-        !todaysAttendance.some(a => a.staff && a.staff._id === staff._id)
-      );
+      const unmarkedStaff = staffData.filter(staff => {
+        const staffId = getStaffId(staff);
+        return staff.status === 'active' && 
+          !todaysAttendance.some(a => {
+            const attendanceStaffId = getAttendanceStaffId(a);
+            return attendanceStaffId === staffId;
+          });
+      });
 
       if (unmarkedStaff.length === 0) {
         console.log('No unmarked staff found for auto-absent marking.');
@@ -224,14 +235,17 @@ const StaffManagementSystem = () => {
       console.log(`Auto-marking ${unmarkedStaff.length} staff as absent for ${today}`);
 
       // Mark all unmarked staff as absent
-      const absentPromises = unmarkedStaff.map(staff => 
-        attendanceAPI.markAttendance({
-          staffId: staff._id,
+      const absentPromises = unmarkedStaff.map(staff => {
+        const staffId = getStaffId(staff);
+        console.log(`Marking staff ${staff.name} (ID: ${staffId}) as absent`);
+        
+        return attendanceAPI.markAttendance({
+          staffId: staffId,
           date: today,
           status: 'absent',
           notes: `Auto-marked as absent at ${currentTime} (past closing time: ${staffSettings.closingTime})`
-        })
-      );
+        });
+      });
 
       await Promise.all(absentPromises);
       
@@ -240,12 +254,10 @@ const StaffManagementSystem = () => {
       if (isMountedRef.current) {
         setTodaysAttendance(attendanceResponse.data.attendance || []);
         
-        // Update stats if on dashboard
         if (activeTab === 'dashboard') {
           await fetchDashboardStats();
         }
         
-        // Update attendance records if on attendance tab
         if (activeTab === 'attendance') {
           await fetchAttendance();
         }
@@ -253,7 +265,6 @@ const StaffManagementSystem = () => {
 
       console.log(`Successfully auto-marked ${unmarkedStaff.length} staff as absent`);
       
-      // Show notification to user
       if (isMountedRef.current) {
         alert(`Auto-absent marking completed: ${unmarkedStaff.length} staff members marked as absent for today.`);
       }
@@ -272,16 +283,15 @@ const StaffManagementSystem = () => {
     }
   }, [staffData, todaysAttendance, staffSettings, activeTab, autoAbsentProcessed, staffSettingsLoading]);
 
-  // Check for auto-absent marking every minute when on dashboard or attendance tab
+  // Check for auto-absent marking
   useEffect(() => {
     if ((activeTab === 'dashboard' || activeTab === 'attendance') && !autoAbsentProcessed && !staffSettingsLoading) {
       const checkInterval = setInterval(() => {
         if (isMountedRef.current) {
           markUnmarkedStaffAsAbsent();
         }
-      }, 60000); // Check every minute
+      }, 60000);
 
-      // Also check immediately when switching to these tabs
       const immediateCheck = setTimeout(() => {
         if (isMountedRef.current) {
           markUnmarkedStaffAsAbsent();
@@ -295,131 +305,124 @@ const StaffManagementSystem = () => {
     }
   }, [activeTab, markUnmarkedStaffAsAbsent, autoAbsentProcessed, staffSettingsLoading]);
 
-  // Reset auto-absent processed flag when date changes or staff data changes
+  // Reset auto-absent processed flag when date changes
   useEffect(() => {
     setAutoAbsentProcessed(false);
   }, [attendanceDate, staffData]);
 
-  // Reset auto-absent processed flag at midnight (new day) and update statuses
-useEffect(() => {
-  const checkMidnightReset = setInterval(() => {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
+  // Reset at midnight
+  useEffect(() => {
+    const checkMidnightReset = setInterval(() => {
+      const now = new Date();
+      const hours = now.getHours();
+      const minutes = now.getMinutes();
 
-    // Reset at 00:01 every day
-    if (hours === 0 && minutes === 1 && isMountedRef.current) {
-      setAutoAbsentProcessed(false);
-      setAttendanceDate(getTodayDate());
-      // Reset staff statuses to not_marked
-      setStaffData(prev => prev.map(staff => ({ ...staff, currentStatus: 'not_marked' })));
-      setFilteredStaff(prev => prev.map(staff => ({ ...staff, currentStatus: 'not_marked' })));
-      fetchAttendance();
-      fetchTodaysAttendance();
-      fetchDashboardStats();
-      console.log('Auto-absent flag and statuses reset for new day');
-    }
-  }, 60000); // Check every minute
+      if (hours === 0 && minutes === 1 && isMountedRef.current) {
+        setAutoAbsentProcessed(false);
+        setAttendanceDate(getTodayDate());
+        setStaffData(prev => prev.map(staff => ({ ...staff, currentStatus: 'not_marked' })));
+        setFilteredStaff(prev => prev.map(staff => ({ ...staff, currentStatus: 'not_marked' })));
+        fetchAttendance();
+        fetchTodaysAttendance();
+        fetchDashboardStats();
+        console.log('Auto-absent flag and statuses reset for new day');
+      }
+    }, 60000);
 
-  return () => clearInterval(checkMidnightReset);
-}, []);
+    return () => clearInterval(checkMidnightReset);
+  }, []);
 
-  // Memoized function to update staff status
- const updateStaffStatusBasedOnAttendance = useCallback(() => {
-  if (!isMountedRef.current || staffData.length === 0) {
-    return;
-  }
+  const updateStaffStatusBasedOnAttendance = useCallback(() => {
+    if (!isMountedRef.current || staffData.length === 0) return;
 
-  const updatedStaffData = staffData.map(staff => {
-    const attendanceRecord = todaysAttendance.find(a => a.staff && a.staff._id === staff._id);
+    const updatedStaffData = staffData.map(staff => {
+      const staffId = getStaffId(staff);
+      const attendanceRecord = todaysAttendance.find(a => getAttendanceStaffId(a) === staffId);
 
-    if (!attendanceRecord) {
-      return { ...staff, currentStatus: 'not_marked' };
-    }
+      if (!attendanceRecord) {
+        return { ...staff, currentStatus: 'not_marked' };
+      }
 
-    switch (attendanceRecord.status) {
-      case 'absent':
-        return { ...staff, currentStatus: 'absent' };
-      case 'on_leave':
-        return { ...staff, currentStatus: 'on_leave' };
-      case 'present':
-      case 'late':
-      case 'half_day':
-        if (attendanceRecord.checkIn && attendanceRecord.checkOut) {
-          const now = new Date();
-          const currentTime = now.getHours() * 60 + now.getMinutes();
-          const checkInTime = new Date(attendanceRecord.checkIn);
-          const checkOutTime = new Date(attendanceRecord.checkOut);
-          const checkInMinutes = checkInTime.getHours() * 60 + checkInTime.getMinutes();
-          const checkOutMinutes = checkOutTime.getHours() * 60 + checkOutTime.getMinutes();
+      switch (attendanceRecord.status) {
+        case 'absent':
+          return { ...staff, currentStatus: 'absent' };
+        case 'on_leave':
+          return { ...staff, currentStatus: 'on_leave' };
+        case 'present':
+        case 'late':
+        case 'half_day':
+          if (attendanceRecord.checkIn && attendanceRecord.checkOut) {
+            const now = new Date();
+            const currentTime = now.getHours() * 60 + now.getMinutes();
+            const checkInTime = new Date(attendanceRecord.checkIn);
+            const checkOutTime = new Date(attendanceRecord.checkOut);
+            const checkInMinutes = checkInTime.getHours() * 60 + checkInTime.getMinutes();
+            const checkOutMinutes = checkOutTime.getHours() * 60 + checkOutTime.getMinutes();
 
-          if (currentTime >= checkInMinutes && currentTime <= checkOutMinutes) {
+            if (currentTime >= checkInMinutes && currentTime <= checkOutMinutes) {
+              return { ...staff, currentStatus: 'active' };
+            } else {
+              return { ...staff, currentStatus: 'inactive' };
+            }
+          } else if (attendanceRecord.checkIn && !attendanceRecord.checkOut) {
             return { ...staff, currentStatus: 'active' };
           } else {
             return { ...staff, currentStatus: 'inactive' };
           }
-        } else if (attendanceRecord.checkIn && !attendanceRecord.checkOut) {
-          return { ...staff, currentStatus: 'active' };
-        } else {
-          return { ...staff, currentStatus: 'inactive' };
-        }
-      default:
-        return { ...staff, currentStatus: 'not_marked' };
-    }
-  });
+        default:
+          return { ...staff, currentStatus: 'not_marked' };
+      }
+    });
 
-  // Only update if data actually changed
-  const hasChanges = JSON.stringify(updatedStaffData) !== JSON.stringify(staffData);
-  if (hasChanges) {
-    setStaffData(updatedStaffData);
-    setFilteredStaff(updatedStaffData);
-  }
-}, [staffData, todaysAttendance]);
+    const hasChanges = JSON.stringify(updatedStaffData) !== JSON.stringify(staffData);
+    if (hasChanges) {
+      setStaffData(updatedStaffData);
+      setFilteredStaff(updatedStaffData);
+    }
+  }, [staffData, todaysAttendance]);
 
   // Initial load effect
   useEffect(() => {
     isMountedRef.current = true;
     
- const fetchInitialData = async () => {
-  try {
-    setLoading(true);
-    setError(null);
+    const fetchInitialData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-    // Fetch staff data
-    const staffResponse = await staffAPI.getAllStaff();
-    if (isMountedRef.current) {
-      // Initialize all staff with not_marked status
-      const initialStaff = (staffResponse.data.staff || []).map(staff => ({
-        ...staff,
-        currentStatus: 'not_marked'
-      }));
-      setStaffData(initialStaff);
-      setFilteredStaff(initialStaff);
-    }
+        const staffResponse = await staffAPI.getAllStaff();
+        if (isMountedRef.current) {
+          const initialStaff = (staffResponse.data.staff || []).map(staff => ({
+            ...staff,
+            currentStatus: 'not_marked'
+          }));
+          setStaffData(initialStaff);
+          setFilteredStaff(initialStaff);
+          
+          // Set active staff
+          const active = initialStaff.filter(staff => staff.status === 'active');
+          setActiveStaff(active);
+        }
 
-    // Fetch today's attendance data
-    const today = getTodayDate();
-    const attendanceResponse = await attendanceAPI.getAttendance({ date: today });
-    if (isMountedRef.current) {
-      setTodaysAttendance(attendanceResponse.data.attendance || []);
-    }
+        const today = getTodayDate();
+        const attendanceResponse = await attendanceAPI.getAttendance({ date: today });
+        if (isMountedRef.current) {
+          setTodaysAttendance(attendanceResponse.data.attendance || []);
+        }
 
-    // Fetch dashboard stats
-    await fetchDashboardStats();
-
-    // Fetch staff settings for PAN and times
-    await fetchStaffSettings();
-  } catch (error) {
-    console.error('Error fetching initial data:', error);
-    if (isMountedRef.current) {
-      setError(error.response?.status === 401 ? 'Please log in to view data' : `Failed to fetch initial data: ${error.message}`);
-    }
-  } finally {
-    if (isMountedRef.current) {
-      setLoading(false);
-    }
-  }
-};
+        await fetchDashboardStats();
+        await fetchStaffSettings();
+      } catch (error) {
+        console.error('Error fetching initial data:', error);
+        if (isMountedRef.current) {
+          setError(error.response?.status === 401 ? 'Please log in to view data' : `Failed to fetch initial data: ${error.message}`);
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
+      }
+    };
     
     fetchInitialData();
     
@@ -449,15 +452,6 @@ useEffect(() => {
       console.error('Error fetching staff settings:', error);
       if (isMountedRef.current) {
         setStaffSettingsError(`Failed to fetch staff settings: ${error.message}. Using default values.`);
-        setStaffSettings({
-          openingTime: '09:00',
-          closingTime: '18:00',
-          panNumber: '',
-          defaultShiftHours: 8,
-          overtimeRate: 1.5,
-          maxLeavesPerYear: 15,
-          requireManagerApprovalForLeave: true
-        });
       }
     } finally {
       if (isMountedRef.current) {
@@ -471,7 +465,6 @@ useEffect(() => {
     e.preventDefault();
     if (!isMountedRef.current) return;
     
-    // Validate PAN number before submission
     if (!validatePanNumber(staffSettings.panNumber)) {
       setPanError('Invalid PAN number format. Please enter exactly 9 digits (e.g., 123456789).');
       return;
@@ -483,8 +476,6 @@ useEffect(() => {
       setPanError('');
       await staffSettingsAPI.updateStaffSettings(staffSettings);
       alert('Staff settings saved successfully!');
-      
-      // Reset auto-absent flag when settings are updated (in case closing time changed)
       setAutoAbsentProcessed(false);
     } catch (error) {
       console.error('Error saving staff settings:', error);
@@ -509,7 +500,7 @@ useEffect(() => {
     }
   };
 
-  // Search filtering effect for staff (only for dashboard and directory)
+  // Search filtering effect
   useEffect(() => {
     if ((activeTab === 'dashboard' || activeTab === 'directory') && searchTerm) {
       const filtered = staffData.filter(staff => 
@@ -526,52 +517,40 @@ useEffect(() => {
   // Attendance tab effect
   useEffect(() => {
     if (activeTab === 'attendance') {
-      // Reset fetch counter
       attendanceFetchRef.current = 0;
-      setAutoAbsentProcessed(false); // Reset auto-absent flag when switching to attendance tab
-      
+      setAutoAbsentProcessed(false);
       fetchAttendance();
       
-      // Get active staff for attendance marking
       const active = staffData.filter(staff => staff.status === 'active');
       setActiveStaff(active);
-    } else {
-      // Clear attendance data when not on attendance tab
-      setAttendanceLoading(false);
     }
   }, [activeTab]);
 
-  // Payroll tab effect - only trigger on tab change
+  // Payroll tab effect
   useEffect(() => {
     if (activeTab === 'payroll') {
       fetchPayrollDataWithFilters();
-      // Set active staff for payroll generation
       const active = staffData.filter(staff => staff.status === 'active');
       setActiveStaff(active);
     }
   }, [activeTab]);
 
-  // Refetch payroll when filters change (including debounced search)
   useEffect(() => {
     if (activeTab === 'payroll') {
-      // Add a small delay to prevent rapid successive calls
       const timer = setTimeout(() => {
         fetchPayrollDataWithFilters();
       }, 100);
-      
       return () => clearTimeout(timer);
     }
   }, [activeTab, selectedYear, selectedMonth, selectedStatus, debouncedPayrollSearchTerm]);
 
-  // Refetch attendance when date changes
   useEffect(() => {
     if (activeTab === 'attendance') {
-      setAutoAbsentProcessed(false); // Reset when date changes
+      setAutoAbsentProcessed(false);
       fetchAttendance();
     }
   }, [attendanceDate]);
 
-  // Auto-update attendance date to current if changed
   useEffect(() => {
     if (activeTab === 'attendance') {
       const checkDateInterval = setInterval(() => {
@@ -580,76 +559,54 @@ useEffect(() => {
           setAttendanceDate(currentDate);
           fetchAttendance();
         }
-      }, 60000); // Check every minute
-
+      }, 60000);
       return () => clearInterval(checkDateInterval);
     }
   }, [activeTab, attendanceDate]);
 
-const fetchPayrollDataWithFilters = async () => {
-  if (!isMountedRef.current) return;
-  try {
-    setPayrollLoading(true);
-    setPayrollError(null);
+  const fetchPayrollDataWithFilters = async () => {
+    if (!isMountedRef.current) return;
+    try {
+      setPayrollLoading(true);
+      setPayrollError(null);
 
-    // Prepare params for filtered payrolls
-    const params = {
-      page: 1,
-      limit: 1000,
-    };
-    if (selectedYear) params.year = selectedYear;
-    if (selectedMonth) params.month = selectedMonth;
-    if (selectedStatus !== 'all') params.status = selectedStatus;
+      const params = { page: 1, limit: 1000 };
+      if (selectedYear) params.year = selectedYear;
+      if (selectedMonth) params.month = selectedMonth;
+      if (selectedStatus !== 'all') params.status = selectedStatus;
 
-    console.log('Fetching payroll with params:', params);
-
-    // Fetch filtered payrolls - FIXED: Use the correct API structure
-    const payrollsResponse = await payrollAPI.getPayrolls(params);
-    
-    // Debug the response structure
-    console.log('Full payroll response:', payrollsResponse);
-    
-    if (isMountedRef.current) {
-      // Handle different response structures
-      const payrollData = payrollsResponse.data || payrollsResponse;
-      console.log('Processed payroll data:', payrollData);
+      const payrollsResponse = await payrollAPI.getPayrolls(params);
       
-      if (payrollData && payrollData.payrolls) {
-        setPayrolls(payrollData.payrolls || []);
-      } else if (Array.isArray(payrollData)) {
-        // If response is directly an array
-        setPayrolls(payrollData);
-      } else {
-        console.warn('Unexpected payroll response structure:', payrollData);
+      if (isMountedRef.current) {
+        const payrollData = payrollsResponse.data || payrollsResponse;
+        
+        if (payrollData && payrollData.payrolls) {
+          setPayrolls(payrollData.payrolls || []);
+        } else if (Array.isArray(payrollData)) {
+          setPayrolls(payrollData);
+        } else {
+          setPayrolls([]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching payroll data:', error);
+      if (isMountedRef.current) {
+        setPayrollError(error.response?.data?.message || error.message || `Failed to fetch payroll data`);
         setPayrolls([]);
       }
+    } finally {
+      if (isMountedRef.current) {
+        setPayrollLoading(false);
+      }
     }
-  } catch (error) {
-    console.error('Error fetching payroll data:', error);
-    if (isMountedRef.current) {
-      const errorMessage = error.response?.data?.message || 
-                          error.message || 
-                          `Failed to fetch payroll data`;
-      setPayrollError(errorMessage);
-      console.error('Payroll error details:', error.response || error);
-      // Set empty array to prevent further errors
-      setPayrolls([]);
-    }
-  } finally {
-    if (isMountedRef.current) {
-      setPayrollLoading(false);
-    }
-  }
-};
+  };
 
-  // Staff settings tab effect
   useEffect(() => {
     if (activeTab === 'settings') {
       fetchStaffSettings();
     }
   }, [activeTab]);
 
-  // Scroll to form when edit form is shown
   useEffect(() => {
     if (showEditForm) {
       const timer = setTimeout(() => {
@@ -658,35 +615,30 @@ const fetchPayrollDataWithFilters = async () => {
           formElement.scrollIntoView({ behavior: 'smooth' });
         }
       }, 100);
-      
       return () => clearTimeout(timer);
     }
   }, [showEditForm]);
 
-  // Update staff status based on attendance for dashboard and directory
   useEffect(() => {
     if ((activeTab === 'dashboard' || activeTab === 'directory') && staffData.length > 0 && todaysAttendance.length > 0) {
       const timer = setTimeout(() => {
         if (isMountedRef.current) {
           updateStaffStatusBasedOnAttendance();
         }
-      }, 100); // Small delay to prevent rapid successive calls
-      
+      }, 100);
       return () => clearTimeout(timer);
     }
   }, [activeTab, todaysAttendance, staffData, updateStaffStatusBasedOnAttendance]);
 
-  // Auto-fill salary when staff is selected in payroll form
   useEffect(() => {
     if (payrollForm.staffId && !isEdit) {
-      const selected = activeStaff.find(s => s._id === payrollForm.staffId);
+      const selected = activeStaff.find(s => getStaffId(s) === payrollForm.staffId);
       if (selected) {
         setPayrollForm(prev => ({ ...prev, salary: selected.salary || 0 }));
       }
     }
   }, [payrollForm.staffId, activeStaff, isEdit]);
 
-  // Prefill PAN number in new staff form
   useEffect(() => {
     if (showAddForm && staffSettings.panNumber) {
       setNewStaff(prev => ({ ...prev, panNo: staffSettings.panNumber }));
@@ -703,6 +655,8 @@ const fetchPayrollDataWithFilters = async () => {
       if (isMountedRef.current) {
         setStaffData(response.data.staff || []);
         setFilteredStaff(response.data.staff || []);
+        const active = (response.data.staff || []).filter(staff => staff.status === 'active');
+        setActiveStaff(active);
       }
     } catch (error) {
       console.error('Error fetching staff data:', error);
@@ -757,24 +711,17 @@ const fetchPayrollDataWithFilters = async () => {
     
     try {
       setAttendanceLoading(true);
-      setError(null);
-      
-      // Increment fetch counter to prevent stale calls
       attendanceFetchRef.current += 1;
       const currentFetchId = attendanceFetchRef.current;
       
       const today = getTodayDate();
       const response = await attendanceAPI.getAttendance({ date: today });
       
-      // Only update if this is the latest fetch
       if (currentFetchId === attendanceFetchRef.current && isMountedRef.current) {
         setTodaysAttendance(response.data.attendance || []);
       }
     } catch (error) {
       console.error('Error fetching attendance:', error);
-      if (isMountedRef.current) {
-        setError(`Failed to fetch attendance data: ${error.message}. Please check your connection and try again.`);
-      }
     } finally {
       if (isMountedRef.current) {
         setAttendanceLoading(false);
@@ -800,7 +747,7 @@ const fetchPayrollDataWithFilters = async () => {
     } catch (error) {
       console.error('Error fetching attendance:', error);
       if (isMountedRef.current) {
-        setError(`Failed to fetch attendance data: ${error.message}. Please check your connection and try again.`);
+        setError(`Failed to fetch attendance data: ${error.message}`);
       }
     } finally {
       if (isMountedRef.current) {
@@ -811,7 +758,7 @@ const fetchPayrollDataWithFilters = async () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'panNo') return; // Prevent editing PAN
+    if (name === 'panNo') return;
     if (name.includes('.')) {
       const [parent, child] = name.split('.');
       setNewStaff({
@@ -829,19 +776,16 @@ const fetchPayrollDataWithFilters = async () => {
     }
   };
 
-  // Handle staff settings input change
   const handleStaffSettingsInputChange = (e) => {
     const { name, value, type, checked } = e.target;
     
     if (name === 'panNumber') {
-      // Remove non-numeric characters and trim to 9 digits
       const numericValue = value.replace(/\D/g, '').slice(0, 9);
       setStaffSettings(prev => ({
         ...prev,
         [name]: numericValue
       }));
       
-      // Validate PAN number in real-time
       if (numericValue && !validatePanNumber(numericValue)) {
         setPanError('Invalid PAN number format. Please enter exactly 9 digits (e.g., 123456789).');
       } else {
@@ -859,24 +803,17 @@ const fetchPayrollDataWithFilters = async () => {
   const handleAttendanceInputChange = (e) => {
     const { name, value } = e.target;
     
-    // If status changes, handle field enabling/disabling
     if (name === 'status') {
       setAttendanceForm(prev => {
-        const newForm = {
-          ...prev,
-          [name]: value
-        };
+        const newForm = { ...prev, [name]: value };
         
-        // Clear time fields for certain statuses
         if (value === 'absent' || value === 'on_leave') {
           newForm.checkIn = '';
           newForm.checkOut = '';
         } else if (value === 'present') {
-          // Auto-fill for present
           newForm.checkIn = staffSettings.openingTime;
           newForm.checkOut = staffSettings.closingTime;
         } else if (value === 'late') {
-          // Set current time for checkIn if not already set
           if (!prev.checkIn) {
             newForm.checkIn = getCurrentTime();
           }
@@ -885,14 +822,12 @@ const fetchPayrollDataWithFilters = async () => {
         return newForm;
       });
       
-      // Clear time error when status changes
       if (timeError && (name === 'status' || name === 'checkIn')) {
         setTimeError('');
       }
       return;
     }
     
-    // Validate check-out time is after check-in time
     if (name === 'checkOut' && value && attendanceForm.checkIn) {
       const [checkInHours, checkInMinutes] = attendanceForm.checkIn.split(':').map(Number);
       const [checkOutHours, checkOutMinutes] = value.split(':').map(Number);
@@ -915,7 +850,6 @@ const fetchPayrollDataWithFilters = async () => {
     e.preventDefault();
     if (!isMountedRef.current) return;
     
-    // Validate PAN number before submission
     if (!validatePanNumber(newStaff.panNo)) {
       setError('Invalid PAN number format. Please enter exactly 9 digits (e.g., 123456789).');
       return;
@@ -924,11 +858,10 @@ const fetchPayrollDataWithFilters = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await staffAPI.createStaff(newStaff);
+      await staffAPI.createStaff(newStaff);
       alert('Staff member added successfully!');
       
       if (isMountedRef.current) {
-        // Reset form to empty values
         setNewStaff(emptyStaffForm);
         setShowAddForm(false);
         fetchStaffData();
@@ -937,13 +870,11 @@ const fetchPayrollDataWithFilters = async () => {
       console.error('Error adding staff:', error);
       if (isMountedRef.current) {
         if (error.response?.data?.errors) {
-          const errorMessages = error.response.data.errors.join(', ');
-          setError(`Validation errors: ${errorMessages}`);
+          setError(`Validation errors: ${error.response.data.errors.join(', ')}`);
         } else if (error.response?.data?.message) {
           setError(error.response.data.message);
         } else {
-          setError(error.response?.status === 401 ? 
-            'Please log in to add staff' : `Failed to add staff member: ${error.message}`);
+          setError(error.response?.status === 401 ? 'Please log in to add staff' : `Failed to add staff member: ${error.message}`);
         }
       }
     } finally {
@@ -972,25 +903,18 @@ const fetchPayrollDataWithFilters = async () => {
     });
     setShowEditForm(true);
     setShowAddForm(false);
-    
-    // Scroll to the form section
-    const timer = setTimeout(() => {
-      if (isMountedRef.current) {
-        const formElement = document.querySelector('.staff-form-container');
-        if (formElement) {
-          formElement.scrollIntoView({ behavior: 'smooth' });
-        }
-      }
-    }, 100);
-    
-    return () => clearTimeout(timer);
   };
 
   const handleUpdateStaff = async (e) => {
     e.preventDefault();
     if (!isMountedRef.current) return;
     
-    // Validate PAN number before submission
+    const staffId = getStaffId(editingStaff);
+    if (!staffId) {
+      setError('Staff ID not found');
+      return;
+    }
+    
     if (!validatePanNumber(newStaff.panNo)) {
       setError('Invalid PAN number format. Please enter exactly 9 digits (e.g., 123456789).');
       return;
@@ -999,7 +923,7 @@ const fetchPayrollDataWithFilters = async () => {
     try {
       setLoading(true);
       setError(null);
-      await staffAPI.updateStaff(editingStaff._id, newStaff);
+      await staffAPI.updateStaff(staffId, newStaff);
       alert('Staff member updated successfully!');
       
       if (isMountedRef.current) {
@@ -1012,13 +936,11 @@ const fetchPayrollDataWithFilters = async () => {
       console.error('Error updating staff:', error);
       if (isMountedRef.current) {
         if (error.response?.data?.errors) {
-          const errorMessages = error.response.data.errors.join(', ');
-          setError(`Validation errors: ${errorMessages}`);
+          setError(`Validation errors: ${error.response.data.errors.join(', ')}`);
         } else if (error.response?.data?.message) {
           setError(error.response.data.message);
         } else {
-          setError(error.response?.status === 401 ? 
-            'Please log in to update staff' : `Failed to update staff member: ${error.message}`);
+          setError(error.response?.status === 401 ? 'Please log in to update staff' : `Failed to update staff member: ${error.message}`);
         }
       }
     } finally {
@@ -1055,18 +977,20 @@ const fetchPayrollDataWithFilters = async () => {
     }
   };
 
+  // Fixed handleMarkAttendance function
   const handleMarkAttendance = (staff) => {
     if (!isMountedRef.current) return;
     
     setSelectedStaffForAttendance(staff);
     const today = getTodayDate();
+    const staffId = getStaffId(staff);
     
     // Check if attendance already exists for today
-    const existingAttendance = todaysAttendance.find(a => a.staff && a.staff._id === staff._id);
+    const existingAttendance = todaysAttendance.find(a => getAttendanceStaffId(a) === staffId);
     
     if (existingAttendance) {
       setAttendanceForm({
-        staffId: staff._id,
+        staffId: staffId,
         date: today,
         checkIn: existingAttendance.checkIn ? formatTimeForInput(existingAttendance.checkIn) : getCurrentTime(),
         checkOut: existingAttendance.checkOut ? formatTimeForInput(existingAttendance.checkOut) : '',
@@ -1075,7 +999,7 @@ const fetchPayrollDataWithFilters = async () => {
       });
     } else {
       setAttendanceForm({
-        staffId: staff._id,
+        staffId: staffId,
         date: today,
         checkIn: getCurrentTime(),
         checkOut: '',
@@ -1104,7 +1028,6 @@ const fetchPayrollDataWithFilters = async () => {
     e.preventDefault();
     if (!isMountedRef.current) return;
     
-    // Validate required fields based on status
     if ((attendanceForm.status === 'absent' || attendanceForm.status === 'on_leave') && !attendanceForm.notes) {
       setError('Notes are mandatory for absence or leave');
       return;
@@ -1115,13 +1038,11 @@ const fetchPayrollDataWithFilters = async () => {
       return;
     }
     
-    // Validate check-out time
     if (attendanceForm.checkOut && timeError) {
       setError(timeError);
       return;
     }
     
-    // Enforce compulsory check-in and check-out for certain statuses
     if (['present', 'late', 'half_day'].includes(attendanceForm.status)) {
       if (!attendanceForm.checkIn || !attendanceForm.checkOut) {
         setError('Both check-in and check-out times are required for this status');
@@ -1144,7 +1065,6 @@ const fetchPayrollDataWithFilters = async () => {
         if (attendanceForm.checkIn) {
           formattedData.checkIn = attendanceForm.checkIn;
         }
-        
         if (attendanceForm.checkOut) {
           formattedData.checkOut = attendanceForm.checkOut;
         }
@@ -1159,9 +1079,7 @@ const fetchPayrollDataWithFilters = async () => {
         if (activeTab === 'attendance') {
           fetchAttendance();
         }
-        fetchDashboardStats(); // Refresh dashboard stats
-        
-        // Reset auto-absent flag since attendance was manually marked
+        fetchDashboardStats();
         setAutoAbsentProcessed(false);
       }
     } catch (error) {
@@ -1180,7 +1098,6 @@ const fetchPayrollDataWithFilters = async () => {
     setSearchTerm(e.target.value);
   };
 
-  // Fixed handler for payroll search - prevents focus loss
   const handlePayrollSearch = (e) => {
     setPayrollSearchTerm(e.target.value);
   };
@@ -1188,14 +1105,12 @@ const fetchPayrollDataWithFilters = async () => {
   const handleAddStaffButtonClick = () => {
     if (!isMountedRef.current) return;
     
-    // Reset form to empty values
     setNewStaff({ ...emptyStaffForm, panNo: staffSettings.panNumber });
     setShowAddForm(!showAddForm);
     setShowEditForm(false);
     setEditingStaff(null);
   };
 
-  // Calculate operating duration for display
   const calculateDuration = (startTime, endTime) => {
     if (!startTime || !endTime) return 'N/A';
     
@@ -1204,7 +1119,6 @@ const fetchPayrollDataWithFilters = async () => {
     
     let durationMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
     
-    // Handle overnight operations
     if (durationMinutes < 0) {
       durationMinutes += 24 * 60;
     }
@@ -1241,7 +1155,7 @@ const fetchPayrollDataWithFilters = async () => {
   const handleEditPayroll = () => {
     setShowPayrollDetailsModal(false);
     setPayrollForm({
-      staffId: selectedPayroll.staff._id,
+      staffId: getStaffId(selectedPayroll.staff),
       month: selectedPayroll.month,
       year: selectedPayroll.year,
       salary: selectedPayroll.basicSalary,
@@ -1264,76 +1178,68 @@ const fetchPayrollDataWithFilters = async () => {
     }));
   };
 
-const handleGeneratePayroll = async (e, retryCount = 0) => {
-  e.preventDefault();
-  if (!payrollForm.staffId) {
-    setPayrollError('Please select a staff member.');
-    return;
-  }
-  if (!payrollForm.month || !payrollForm.year) {
-    setPayrollError('Please select a valid month and year.');
-    return;
-  }
-  if (!payrollForm.salary || isNaN(parseFloat(payrollForm.salary))) {
-    setPayrollError('Please provide a valid salary amount.');
-    return;
-  }
-  
-  console.log('Current payrollForm state:', payrollForm);
-  
-  try {
-    setPayrollLoading(true);
-    setPayrollError(null);
-    let response;
+  const handleGeneratePayroll = async (e, retryCount = 0) => {
+    e.preventDefault();
+    if (!payrollForm.staffId) {
+      setPayrollError('Please select a staff member.');
+      return;
+    }
+    if (!payrollForm.month || !payrollForm.year) {
+      setPayrollError('Please select a valid month and year.');
+      return;
+    }
+    if (!payrollForm.salary || isNaN(parseFloat(payrollForm.salary))) {
+      setPayrollError('Please provide a valid salary amount.');
+      return;
+    }
     
-    if (isEdit) {
-      response = await payrollAPI.updatePayroll(selectedPayroll._id, payrollForm);
-      alert('Payroll updated successfully!');
-    } else {
-      // Enhanced duplicate check with better error handling
-      const checkResponse = await payrollAPI.checkPayrollExists({
-        staffId: payrollForm.staffId,
-        month: payrollForm.month,
-        year: payrollForm.year
-      });
+    try {
+      setPayrollLoading(true);
+      setPayrollError(null);
+      let response;
       
-      console.log('Payroll check response:', checkResponse);
-      
-      if (checkResponse.exists) {
-        const staffName = activeStaff.find(s => s._id === payrollForm.staffId)?.name || 'this staff member';
-        setPayrollError(`Payroll already exists for ${staffName} for ${payrollForm.month}/${payrollForm.year}.`);
-        return;
-      }
+      if (isEdit) {
+        response = await payrollAPI.updatePayroll(selectedPayroll._id, payrollForm);
+        alert('Payroll updated successfully!');
+      } else {
+        const checkResponse = await payrollAPI.checkPayrollExists({
+          staffId: payrollForm.staffId,
+          month: payrollForm.month,
+          year: payrollForm.year
+        });
+        
+        if (checkResponse.exists) {
+          const staffName = activeStaff.find(s => getStaffId(s) === payrollForm.staffId)?.name || 'this staff member';
+          setPayrollError(`Payroll already exists for ${staffName} for ${payrollForm.month}/${payrollForm.year}.`);
+          return;
+        }
 
-      console.log('Sending payroll data:', payrollForm);
+        response = await payrollAPI.generatePayroll(payrollForm);
+        alert('Payroll generated successfully!');
+      }
       
-      response = await payrollAPI.generatePayroll(payrollForm);
-      alert('Payroll generated successfully!');
+      setShowGeneratePayrollModal(false);
+      setIsEdit(false);
+      await fetchPayrollDataWithFilters();
+    } catch (error) {
+      console.error('Error generating/updating payroll:', error);
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          error.message || 
+                          'Failed to generate payroll.';
+      
+      if (retryCount < 1 && (errorMessage.includes('already exists') || errorMessage.includes('race condition') || errorMessage.includes('index conflict'))) {
+        console.log('Retrying generatePayroll due to possible race condition...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return handleGeneratePayroll(e, retryCount + 1);
+      }
+      
+      setPayrollError(errorMessage);
+    } finally {
+      setPayrollLoading(false);
     }
-    
-    setShowGeneratePayrollModal(false);
-    setIsEdit(false);
-    await fetchPayrollDataWithFilters();
-  } catch (error) {
-    console.error('Error generating/updating payroll:', error);
-    const errorMessage = error.response?.data?.message || 
-                        error.response?.data?.error || 
-                        error.message || 
-                        'Failed to generate payroll. Please check the console for details.';
-    
-    // Enhanced retry logic
-    if (retryCount < 1 && (errorMessage.includes('already exists') || errorMessage.includes('race condition') || errorMessage.includes('index conflict'))) {
-      console.log('Retrying generatePayroll due to possible race condition...');
-      // Add a small delay before retry
-      await new Promise(resolve => setTimeout(resolve, 500));
-      return handleGeneratePayroll(e, retryCount + 1);
-    }
-    
-    setPayrollError(errorMessage);
-  } finally {
-    setPayrollLoading(false);
-  }
-};
+  };
+
   const handleViewPayroll = (payroll) => {
     setSelectedPayroll(payroll);
     setShowPayrollDetailsModal(true);
@@ -1348,19 +1254,14 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
     { id: 'settings', label: 'Staff Settings', icon: <FaCog /> }
   ];
 
-  // Generate years from 2020 to 2026
   const years = Array.from({ length: 7 }, (_, i) => 2020 + i);
-
-  // Generate months
   const months = Array.from({ length: 12 }, (_, i) => ({
     value: i + 1,
     label: new Date(2024, i, 1).toLocaleString('default', { month: 'long' })
   }));
 
-  // Check if header actions should be shown
   const shouldShowHeaderActions = ['dashboard', 'directory'].includes(activeTab);
 
-  // Client-side filtering for payroll records
   const filteredPayrolls = useMemo(() => {
     if (!debouncedPayrollSearchTerm.trim()) return payrolls;
     const term = debouncedPayrollSearchTerm.toLowerCase().trim();
@@ -1369,7 +1270,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
     );
   }, [payrolls, debouncedPayrollSearchTerm]);
 
-  // Compute payroll summary based on filtered payrolls
   const computedPayrollSummary = useMemo(() => {
     return filteredPayrolls.reduce((acc, p) => {
       acc.totalStaff += 1;
@@ -1381,7 +1281,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
     }, { totalStaff: 0, totalBasicSalary: 0, totalAllowances: 0, totalDeductions: 0, pending: 0 });
   }, [filteredPayrolls]);
 
-  // Client-side filtering for attendance records
   const filteredAttendanceRecords = useMemo(() => {
     const term = debouncedAttendanceSearchTerm.toLowerCase().trim();
     return attendanceRecords.filter(record => {
@@ -1391,14 +1290,13 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
     });
   }, [attendanceRecords, debouncedAttendanceSearchTerm, selectedAttendanceStatus]);
 
-  // Get number of unmarked staff for today
   const unmarkedStaffCount = useMemo(() => {
-    return activeStaff.filter(staff => 
-      !todaysAttendance.some(a => a.staff && a.staff._id === staff._id)
-    ).length;
+    return activeStaff.filter(staff => {
+      const staffId = getStaffId(staff);
+      return !todaysAttendance.some(a => getAttendanceStaffId(a) === staffId);
+    }).length;
   }, [activeStaff, todaysAttendance]);
 
-  // Check if auto-absent should be active
   const shouldShowAutoAbsent = useMemo(() => {
     return staffSettings.closingTime && 
            isPastClosingTime(getCurrentTime(), staffSettings.closingTime) && 
@@ -1406,7 +1304,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
            !autoAbsentProcessed;
   }, [staffSettings.closingTime, unmarkedStaffCount, autoAbsentProcessed]);
 
-  // Refresh attendance button handler
   const handleRefreshAttendance = () => {
     setAttendanceDate(getTodayDate());
     setAttendanceSearchTerm('');
@@ -1414,6 +1311,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
     fetchAttendance();
   };
 
+  // Return JSX (same as your original, unchanged)
   return (
     <div className="staff-management-system">
       <div className="staff-header">
@@ -1462,7 +1360,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
         
         {activeTab === 'dashboard' && (
           <>
-            {/* Auto-Absent Status Indicator */}
             {shouldShowAutoAbsent && (
               <div className="staff-info-display" style={{ 
                 backgroundColor: '#fff3cd', 
@@ -1564,7 +1461,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                   <p>Pending Payroll</p>
                 </div>
               </div>
-              {/* Unmarked Staff Card */}
               <div className="staff-card staff-stat-card">
                 <div className={`staff-stat-icon ${unmarkedStaffCount > 0 ? 'staff-bg-danger' : 'staff-bg-success'}`}>
                   <FaUsers />
@@ -1753,16 +1649,13 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         id="panNo"
                         name="panNo"
                         value={newStaff.panNo}
-                        className={`staff-form-control ${error && error.includes('PAN') ? 'staff-form-control-error' : ''}`}
+                        className="staff-form-control"
                         placeholder="Enter PAN number (e.g., 123456789)"
                         required
                         disabled
                         readOnly
                       />
                       <small className="form-help-text">Format: 123456789 (exactly 9 digits) - Auto-filled from settings</small>
-                      {error && error.includes('PAN') && (
-                        <div className="staff-error" style={{fontSize: '12px', marginTop: '5px'}}>{error}</div>
-                      )}
                     </div>
                     
                     <div className="staff-form-group">
@@ -1877,7 +1770,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                     >
                       Cancel
                     </button>
-                    <button type="submit" className="staff-btn staff-btn-primary" disabled={loading || (error && error.includes('PAN'))}>
+                    <button type="submit" className="staff-btn staff-btn-primary" disabled={loading}>
                       {loading ? 'Adding...' : 'Add Staff Member'}
                     </button>
                   </div>
@@ -2006,8 +1899,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         id="edit-panNo"
                         name="panNo"
                         value={newStaff.panNo}
-                        onChange={handleInputChange}
-                        className={`staff-form-control ${error && error.includes('PAN') ? 'staff-form-control-error' : ''}`}
+                        className="staff-form-control"
                         placeholder="Enter PAN number (e.g., 123456789)"
                         required
                         disabled={loading}
@@ -2016,9 +1908,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         pattern="\d{9}"
                       />
                       <small className="form-help-text">Format: 123456789 (exactly 9 digits)</small>
-                      {error && error.includes('PAN') && (
-                        <div className="staff-error" style={{fontSize: '12px', marginTop: '5px'}}>{error}</div>
-                      )}
                     </div>
                     
                     <div className="staff-form-group">
@@ -2139,7 +2028,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                     >
                       Cancel
                     </button>
-                    <button type="submit" className="staff-btn staff-btn-primary" disabled={loading || (error && error.includes('PAN'))}>
+                    <button type="submit" className="staff-btn staff-btn-primary" disabled={loading}>
                       {loading ? 'Updating...' : 'Update Staff Member'}
                     </button>
                   </div>
@@ -2206,7 +2095,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
         
         {activeTab === 'attendance' && (
           <div className="staff-attendance-container">
-            {/* Auto-Absent Status Indicator for Attendance Tab */}
             {shouldShowAutoAbsent && (
               <div className="staff-info-display" style={{ 
                 backgroundColor: '#fff3cd', 
@@ -2441,10 +2329,11 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                   marginTop: '1rem' 
                 }}>
                   {activeStaff.map(staff => {
-                    const hasAttendance = todaysAttendance.some(a => a.staff && a.staff._id === staff._id);
+                    const staffId = getStaffId(staff);
+                    const hasAttendance = todaysAttendance.some(a => getAttendanceStaffId(a) === staffId);
                     const isAutoAbsentPending = !hasAttendance && shouldShowAutoAbsent;
                     return (
-                      <div key={staff._id} className="staff-attendance-staff-item" style={{ 
+                      <div key={staffId} className="staff-attendance-staff-item" style={{ 
                         padding: '1rem', 
                         border: '1px solid #dee2e6', 
                         borderRadius: '8px',
@@ -2689,7 +2578,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
         
         {activeTab === 'payroll' && (
           <div className="staff-payroll-container">
-            {/* Payroll Header with Generate Button */}
             <div className="staff-table-header">
               <div className="staff-table-header">
                 <h3>Payroll Management</h3>
@@ -2703,7 +2591,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
               </div>
             </div>
 
-            {/* Payroll Search Field - Fixed to prevent focus loss */}
             <div className="staff-payroll-search" style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
                 <FaSearch className="staff-search-icon" style={{ 
@@ -2803,7 +2690,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
               </div>
             </div>
 
-            {/* Payroll Filters */}
             <div className="staff-payroll-filters" style={{ 
               display: 'flex', 
               gap: '1rem', 
@@ -2818,7 +2704,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                   value={selectedYear || ''}
                   onChange={(e) => {
                     setSelectedYear(e.target.value ? parseInt(e.target.value) : null);
-                    if (!e.target.value) setSelectedMonth(null); // Reset month if year cleared
+                    if (!e.target.value) setSelectedMonth(null);
                   }}
                   className="staff-form-control"
                   disabled={payrollLoading}
@@ -2909,8 +2795,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                       <td colSpan="5" style={{ textAlign: 'center', padding: '20px' }}>
                         {payrollSearchTerm ? 
                           `No payroll records found for "${payrollSearchTerm}"` : 
-                          'No payroll records found.'
-                        }
+                          'No payroll records found.'}
                       </td>
                     </tr>
                   )}
@@ -2977,7 +2862,7 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         >
                           <option value="">Select staff</option>
                           {activeStaff.map(staff => (
-                            <option key={staff._id} value={staff._id}>{staff.name} - {staff.position}</option>
+                            <option key={getStaffId(staff)} value={getStaffId(staff)}>{staff.name} - {staff.position}</option>
                           ))}
                         </select>
                       </div>
@@ -3065,7 +2950,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         </select>
                       </div>
                       
-                      {/* Allowance */}
                       <div className="staff-form-group" style={{ gridColumn: '1 / -1' }}>
                         <label htmlFor="allowance">Allowance (NPR)</label>
                         <input
@@ -3082,7 +2966,6 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
                         <small className="form-help-text">Additional allowances (transport, medical, etc.)</small>
                       </div>
                       
-                      {/* Deduction */}
                       <div className="staff-form-group" style={{ gridColumn: '1 / -1' }}>
                         <label htmlFor="deduction">Deduction (NPR)</label>
                         <input
@@ -3234,366 +3117,348 @@ const handleGeneratePayroll = async (e, retryCount = 0) => {
           </div>
         )}
         
-       {activeTab === 'performance' && <StaffPerformance />}
+        {activeTab === 'performance' && <StaffPerformance />}
         
         {activeTab === 'settings' && (
-  <div className="staff-settings-container">
-    <div className="staff-table-header">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <FaCog style={{ color: '#007bff' }} />
-        <h3>Staff Management Settings</h3>
-      </div>
-      <p>Configure shop operating hours, business information, and staff policies</p>
-    </div>
-    
-    {staffSettingsLoading && <div className="staff-loading">Loading settings...</div>}
-    {staffSettingsError && <div className="staff-error">{staffSettingsError}</div>}
-    
-    <div className="staff-form-container">
-      <form onSubmit={handleSaveStaffSettings}>
-        <div className="staff-form-grid" style={{ display: 'grid', gap: '2rem' }}>
-          
-          {/* Shop Operating Hours Section */}
-          <div className="staff-form-section">
-            <div className="section-header">
-              <h4><FaClock /> Shop Operating Hours</h4>
-              <p>Set your shop's daily operating schedule for attendance tracking</p>
+          <div className="staff-settings-container">
+            <div className="staff-table-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <FaCog style={{ color: '#007bff' }} />
+                <h3>Staff Management Settings</h3>
+              </div>
+              <p>Configure shop operating hours, business information, and staff policies</p>
             </div>
             
-            <div className="staff-form-grid" style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: '1fr 1fr' }}>
-              <div className="staff-form-group">
-                <label htmlFor="openingTime">
-                  <FaBuilding style={{ marginRight: '0.5rem', color: '#28a745' }} />
-                  Shop Opening Time <span className="required">*</span>
-                </label>
-                <input
-                  type="time"
-                  id="openingTime"
-                  name="openingTime"
-                  value={staffSettings.openingTime}
-                  onChange={handleStaffSettingsInputChange}
-                  className="staff-form-control"
-                  required
-                  disabled={staffSettingsLoading}
-                  min="00:00"
-                  max="23:59"
-                />
-                <small className="form-help-text">
-                  {staffSettings.openingTime ? formatTo12Hour(staffSettings.openingTime) : 'Select opening time'}
-                </small>
-              </div>
-              
-              <div className="staff-form-group">
-                <label htmlFor="closingTime">
-                  <FaClock style={{ marginRight: '0.5rem', color: '#dc3545' }} />
-                  Shop Closing Time <span className="required">*</span>
-                </label>
-                <input
-                  type="time"
-                  id="closingTime"
-                  name="closingTime"
-                  value={staffSettings.closingTime}
-                  onChange={handleStaffSettingsInputChange}
-                  className="staff-form-control"
-                  required
-                  disabled={staffSettingsLoading}
-                  min="00:00"
-                  max="23:59"
-                />
-                <small className="form-help-text">
-                  {staffSettings.closingTime ? formatTo12Hour(staffSettings.closingTime) : 'Select closing time'}
-                </small>
-              </div>
-            </div>
+            {staffSettingsLoading && <div className="staff-loading">Loading settings...</div>}
+            {staffSettingsError && <div className="staff-error">{staffSettingsError}</div>}
             
-            {/* Operating Hours Summary */}
-            {staffSettings.openingTime && staffSettings.closingTime && !staffSettingsLoading && (
-              <div className="settings-summary-card">
-                <div className="summary-header">
-                  <FaClock style={{ marginRight: '0.5rem' }} />
-                  <span>Daily Operating Schedule</span>
-                </div>
-                <div className="summary-content">
-                  <div className="time-display">
-                    <span className="time-label">Open:</span>
-                    <span className="time-value">{formatTo12Hour(staffSettings.openingTime)}</span>
-                  </div>
-                  <div className="time-display">
-                    <span className="time-label">Close:</span>
-                    <span className="time-value">{formatTo12Hour(staffSettings.closingTime)}</span>
-                  </div>
-                  <div className="duration-display">
-                    <span className="duration-label">Duration:</span>
-                    <span className="duration-value">
-                      {calculateDuration(staffSettings.openingTime, staffSettings.closingTime)}
-                    </span>
-                  </div>
-                </div>
-                <div className="summary-note">
-                  <FaInfoCircle style={{ marginRight: '0.25rem' }} />
-                  <small>Unmarked attendance will be automatically set to absent after closing time</small>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Business Information Section */}
-          <div className="staff-form-section">
-            <div className="section-header">
-              <h4><FaIdCard /> Business Information</h4>
-              <p>Enter your business tax and identification details</p>
-            </div>
-            
-            <div className="staff-form-group">
-              <label htmlFor="panNumber">
-                <FaFileInvoiceDollar style={{ marginRight: '0.5rem', color: '#17a2b8' }} />
-                Shop PAN Number <span className="required">*</span>
-              </label>
-              <input
-                type="text"
-                id="panNumber"
-                name="panNumber"
-                value={staffSettings.panNumber}
-                onChange={handleStaffSettingsInputChange}
-                className={`staff-form-control ${panError ? 'staff-form-control-error' : ''}`}
-                placeholder="Enter 9-digit PAN number (e.g., 123456789)"
-                required
-                disabled={staffSettingsLoading}
-                maxLength="9"
-                inputMode="numeric"
-                pattern="\d{9}"
-              />
-              <div className="input-help">
-                <small className="form-help-text">Format: Exactly 9 digits (e.g., 123456789)</small>
-                {staffSettings.panNumber && validatePanNumber(staffSettings.panNumber) && (
-                  <div className="validation-success">
-                    <FaCheck style={{ marginRight: '0.25rem', color: '#28a745' }} />
-                    <small>Valid PAN format</small>
-                  </div>
-                )}
-              </div>
-              {panError && <div className="staff-error">{panError}</div>}
-            </div>
-            
-            {/* PAN Number Display */}
-            {staffSettings.panNumber && validatePanNumber(staffSettings.panNumber) && (
-              <div className="settings-summary-card">
-                <div className="summary-content">
-                  <div className="pan-display">
-                    <span className="pan-label">Registered PAN:</span>
-                    <span className="pan-value">{staffSettings.panNumber}</span>
-                  </div>
-                </div>
-                <div className="summary-note">
-                  <FaShieldAlt style={{ marginRight: '0.25rem' }} />
-                  <small>PAN number used for tax reporting and payroll compliance</small>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Staff Policy Section */}
-          <div className="staff-form-section">
-            <div className="section-header">
-              <h4><FaUsersCog /> Staff Policies</h4>
-              <p>Configure default working conditions and leave policies</p>
-            </div>
-            
-            <div className="staff-form-grid" style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
-              <div className="staff-form-group">
-                <label htmlFor="defaultShiftHours">
-                  <FaClock style={{ marginRight: '0.5rem', color: '#6f42c1' }} />
-                  Default Shift Hours <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  id="defaultShiftHours"
-                  name="defaultShiftHours"
-                  value={staffSettings.defaultShiftHours}
-                  onChange={handleStaffSettingsInputChange}
-                  className="staff-form-control"
-                  required
-                  disabled={staffSettingsLoading}
-                  min="1"
-                  max="12"
-                  step="0.5"
-                />
-                <small className="form-help-text">Standard working hours per shift (used for payroll calculation)</small>
-              </div>
-              
-              <div className="staff-form-group">
-                <label htmlFor="overtimeRate">
-                  <FaCalculator style={{ marginRight: '0.5rem', color: '#fd7e14' }} />
-                  Overtime Rate <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  id="overtimeRate"
-                  name="overtimeRate"
-                  value={staffSettings.overtimeRate}
-                  onChange={handleStaffSettingsInputChange}
-                  className="staff-form-control"
-                  required
-                  disabled={staffSettingsLoading}
-                  min="1"
-                  max="3"
-                  step="0.1"
-                />
-                <small className="form-help-text">Multiplier for overtime pay (e.g., 1.5x = 50% extra)</small>
-              </div>
-              
-              <div className="staff-form-group">
-                <label htmlFor="maxLeavesPerYear">
-                  <FaCalendarAlt style={{ marginRight: '0.5rem', color: '#e83e8c' }} />
-                  Max Annual Leaves <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  id="maxLeavesPerYear"
-                  name="maxLeavesPerYear"
-                  value={staffSettings.maxLeavesPerYear}
-                  onChange={handleStaffSettingsInputChange}
-                  className="staff-form-control"
-                  required
-                  disabled={staffSettingsLoading}
-                  min="0"
-                  max="30"
-                />
-                <small className="form-help-text">Maximum paid leave days allowed per year</small>
-              </div>
-              
-              <div className="staff-form-group">
-                <div className="checkbox-container">
-                  <label className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      name="requireManagerApprovalForLeave"
-                      checked={staffSettings.requireManagerApprovalForLeave}
-                      onChange={handleStaffSettingsInputChange}
-                      disabled={staffSettingsLoading}
-                    />
-                    <span className="checkmark"></span>
-                    <span className="checkbox-text">
-                      <FaUserCheck style={{ marginRight: '0.5rem', color: '#20c997' }} />
-                      Require Manager Approval for Leaves
-                    </span>
-                  </label>
-                </div>
-                <small className="form-help-text">All leave requests must be approved by a manager before approval</small>
-              </div>
-            </div>
-          </div>
-          
-          {/* Settings Summary Card */}
-          <div className="staff-form-section summary-section">
-            <div className="section-header">
-              <h4><FaListCheck /> Current Settings Summary</h4>
-              <p>Review your current configuration before saving</p>
-            </div>
-            
-            <div className="settings-summary-grid">
-              <div className="summary-item">
-                <div className="summary-icon">
-                  <FaClock />
-                </div>
-                <div className="summary-details">
-                  <div className="summary-label">Operating Hours</div>
-                  <div className="summary-value">
-                    {staffSettings.openingTime && staffSettings.closingTime 
-                      ? `${formatTo12Hour(staffSettings.openingTime)} - ${formatTo12Hour(staffSettings.closingTime)}`
-                      : 'Not configured'
-                    }
-                  </div>
-                </div>
-              </div>
-              
-              <div className="summary-item">
-                <div className="summary-icon">
-                  <FaIdCard />
-                </div>
-                <div className="summary-details">
-                  <div className="summary-label">PAN Number</div>
-                  <div className={`summary-value ${validatePanNumber(staffSettings.panNumber) ? 'valid' : 'invalid'}`}>
-                    {staffSettings.panNumber || 'Not configured'}
-                    {staffSettings.panNumber && !validatePanNumber(staffSettings.panNumber) && (
-                      <FaExclamationTriangle style={{ marginLeft: '0.25rem', color: '#ffc107' }} />
+            <div className="staff-form-container">
+              <form onSubmit={handleSaveStaffSettings}>
+                <div className="staff-form-grid" style={{ display: 'grid', gap: '2rem' }}>
+                  
+                  <div className="staff-form-section">
+                    <div className="section-header">
+                      <h4><FaClock /> Shop Operating Hours</h4>
+                      <p>Set your shop's daily operating schedule for attendance tracking</p>
+                    </div>
+                    
+                    <div className="staff-form-grid" style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: '1fr 1fr' }}>
+                      <div className="staff-form-group">
+                        <label htmlFor="openingTime">
+                          <FaBuilding style={{ marginRight: '0.5rem', color: '#28a745' }} />
+                          Shop Opening Time <span className="required">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          id="openingTime"
+                          name="openingTime"
+                          value={staffSettings.openingTime}
+                          onChange={handleStaffSettingsInputChange}
+                          className="staff-form-control"
+                          required
+                          disabled={staffSettingsLoading}
+                          min="00:00"
+                          max="23:59"
+                        />
+                        <small className="form-help-text">
+                          {staffSettings.openingTime ? formatTo12Hour(staffSettings.openingTime) : 'Select opening time'}
+                        </small>
+                      </div>
+                      
+                      <div className="staff-form-group">
+                        <label htmlFor="closingTime">
+                          <FaClock style={{ marginRight: '0.5rem', color: '#dc3545' }} />
+                          Shop Closing Time <span className="required">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          id="closingTime"
+                          name="closingTime"
+                          value={staffSettings.closingTime}
+                          onChange={handleStaffSettingsInputChange}
+                          className="staff-form-control"
+                          required
+                          disabled={staffSettingsLoading}
+                          min="00:00"
+                          max="23:59"
+                        />
+                        <small className="form-help-text">
+                          {staffSettings.closingTime ? formatTo12Hour(staffSettings.closingTime) : 'Select closing time'}
+                        </small>
+                      </div>
+                    </div>
+                    
+                    {staffSettings.openingTime && staffSettings.closingTime && !staffSettingsLoading && (
+                      <div className="settings-summary-card">
+                        <div className="summary-header">
+                          <FaClock style={{ marginRight: '0.5rem' }} />
+                          <span>Daily Operating Schedule</span>
+                        </div>
+                        <div className="summary-content">
+                          <div className="time-display">
+                            <span className="time-label">Open:</span>
+                            <span className="time-value">{formatTo12Hour(staffSettings.openingTime)}</span>
+                          </div>
+                          <div className="time-display">
+                            <span className="time-label">Close:</span>
+                            <span className="time-value">{formatTo12Hour(staffSettings.closingTime)}</span>
+                          </div>
+                          <div className="duration-display">
+                            <span className="duration-label">Duration:</span>
+                            <span className="duration-value">
+                              {calculateDuration(staffSettings.openingTime, staffSettings.closingTime)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="summary-note">
+                          <FaInfoCircle style={{ marginRight: '0.25rem' }} />
+                          <small>Unmarked attendance will be automatically set to absent after closing time</small>
+                        </div>
+                      </div>
                     )}
                   </div>
+                  
+                  <div className="staff-form-section">
+                    <div className="section-header">
+                      <h4><FaIdCard /> Business Information</h4>
+                      <p>Enter your business tax and identification details</p>
+                    </div>
+                    
+                    <div className="staff-form-group">
+                      <label htmlFor="panNumber">
+                        <FaFileInvoiceDollar style={{ marginRight: '0.5rem', color: '#17a2b8' }} />
+                        Shop PAN Number <span className="required">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        id="panNumber"
+                        name="panNumber"
+                        value={staffSettings.panNumber}
+                        onChange={handleStaffSettingsInputChange}
+                        className={`staff-form-control ${panError ? 'staff-form-control-error' : ''}`}
+                        placeholder="Enter 9-digit PAN number (e.g., 123456789)"
+                        required
+                        disabled={staffSettingsLoading}
+                        maxLength="9"
+                        inputMode="numeric"
+                        pattern="\d{9}"
+                      />
+                      <div className="input-help">
+                        <small className="form-help-text">Format: Exactly 9 digits (e.g., 123456789)</small>
+                        {staffSettings.panNumber && validatePanNumber(staffSettings.panNumber) && (
+                          <div className="validation-success">
+                            <FaCheck style={{ marginRight: '0.25rem', color: '#28a745' }} />
+                            <small>Valid PAN format</small>
+                          </div>
+                        )}
+                      </div>
+                      {panError && <div className="staff-error">{panError}</div>}
+                    </div>
+                    
+                    {staffSettings.panNumber && validatePanNumber(staffSettings.panNumber) && (
+                      <div className="settings-summary-card">
+                        <div className="summary-content">
+                          <div className="pan-display">
+                            <span className="pan-label">Registered PAN:</span>
+                            <span className="pan-value">{staffSettings.panNumber}</span>
+                          </div>
+                        </div>
+                        <div className="summary-note">
+                          <FaShieldAlt style={{ marginRight: '0.25rem' }} />
+                          <small>PAN number used for tax reporting and payroll compliance</small>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="staff-form-section">
+                    <div className="section-header">
+                      <h4><FaUsersCog /> Staff Policies</h4>
+                      <p>Configure default working conditions and leave policies</p>
+                    </div>
+                    
+                    <div className="staff-form-grid" style={{ display: 'grid', gap: '1.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
+                      <div className="staff-form-group">
+                        <label htmlFor="defaultShiftHours">
+                          <FaClock style={{ marginRight: '0.5rem', color: '#6f42c1' }} />
+                          Default Shift Hours <span className="required">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          id="defaultShiftHours"
+                          name="defaultShiftHours"
+                          value={staffSettings.defaultShiftHours}
+                          onChange={handleStaffSettingsInputChange}
+                          className="staff-form-control"
+                          required
+                          disabled={staffSettingsLoading}
+                          min="1"
+                          max="12"
+                          step="0.5"
+                        />
+                        <small className="form-help-text">Standard working hours per shift (used for payroll calculation)</small>
+                      </div>
+                      
+                      <div className="staff-form-group">
+                        <label htmlFor="overtimeRate">
+                          <FaCalculator style={{ marginRight: '0.5rem', color: '#fd7e14' }} />
+                          Overtime Rate <span className="required">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          id="overtimeRate"
+                          name="overtimeRate"
+                          value={staffSettings.overtimeRate}
+                          onChange={handleStaffSettingsInputChange}
+                          className="staff-form-control"
+                          required
+                          disabled={staffSettingsLoading}
+                          min="1"
+                          max="3"
+                          step="0.1"
+                        />
+                        <small className="form-help-text">Multiplier for overtime pay (e.g., 1.5x = 50% extra)</small>
+                      </div>
+                      
+                      <div className="staff-form-group">
+                        <label htmlFor="maxLeavesPerYear">
+                          <FaCalendarAlt style={{ marginRight: '0.5rem', color: '#e83e8c' }} />
+                          Max Annual Leaves <span className="required">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          id="maxLeavesPerYear"
+                          name="maxLeavesPerYear"
+                          value={staffSettings.maxLeavesPerYear}
+                          onChange={handleStaffSettingsInputChange}
+                          className="staff-form-control"
+                          required
+                          disabled={staffSettingsLoading}
+                          min="0"
+                          max="30"
+                        />
+                        <small className="form-help-text">Maximum paid leave days allowed per year</small>
+                      </div>
+                      
+                      <div className="staff-form-group">
+                        <div className="checkbox-container">
+                          <label className="checkbox-label">
+                            <input
+                              type="checkbox"
+                              name="requireManagerApprovalForLeave"
+                              checked={staffSettings.requireManagerApprovalForLeave}
+                              onChange={handleStaffSettingsInputChange}
+                              disabled={staffSettingsLoading}
+                            />
+                            <span className="checkmark"></span>
+                            <span className="checkbox-text">
+                              <FaUserCheck style={{ marginRight: '0.5rem', color: '#20c997' }} />
+                              Require Manager Approval for Leaves
+                            </span>
+                          </label>
+                        </div>
+                        <small className="form-help-text">All leave requests must be approved by a manager before approval</small>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="staff-form-section summary-section">
+                    <div className="section-header">
+                      <h4><FaListCheck /> Current Settings Summary</h4>
+                      <p>Review your current configuration before saving</p>
+                    </div>
+                    
+                    <div className="settings-summary-grid">
+                      <div className="summary-item">
+                        <div className="summary-icon">
+                          <FaClock />
+                        </div>
+                        <div className="summary-details">
+                          <div className="summary-label">Operating Hours</div>
+                          <div className="summary-value">
+                            {staffSettings.openingTime && staffSettings.closingTime 
+                              ? `${formatTo12Hour(staffSettings.openingTime)} - ${formatTo12Hour(staffSettings.closingTime)}`
+                              : 'Not configured'
+                            }
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="summary-item">
+                        <div className="summary-icon">
+                          <FaIdCard />
+                        </div>
+                        <div className="summary-details">
+                          <div className="summary-label">PAN Number</div>
+                          <div className={`summary-value ${validatePanNumber(staffSettings.panNumber) ? 'valid' : 'invalid'}`}>
+                            {staffSettings.panNumber || 'Not configured'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="summary-item">
+                        <div className="summary-icon">
+                          <FaClock />
+                        </div>
+                        <div className="summary-details">
+                          <div className="summary-label">Shift Hours</div>
+                          <div className="summary-value">{staffSettings.defaultShiftHours}h</div>
+                        </div>
+                      </div>
+                      
+                      <div className="summary-item">
+                        <div className="summary-icon">
+                          <FaCalculator />
+                        </div>
+                        <div className="summary-details">
+                          <div className="summary-label">Overtime Rate</div>
+                          <div className="summary-value">{staffSettings.overtimeRate}x</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              
-              <div className="summary-item">
-                <div className="summary-icon">
-                  <FaClock />
+                
+                <div className="staff-form-actions" style={{ 
+                  display: 'flex', 
+                  gap: '1rem', 
+                  justifyContent: 'space-between', 
+                  marginTop: '2rem',
+                  flexWrap: 'wrap'
+                }}>
+                  <button 
+                    type="button" 
+                    className="staff-btn staff-btn-secondary"
+                    onClick={fetchStaffSettings}
+                    disabled={staffSettingsLoading}
+                  >
+                    <FaSyncAlt style={{ transform: 'rotate(180deg)' }} /> Reset to Defaults
+                  </button>
+                  
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <button 
+                      type="button" 
+                      className="staff-btn staff-btn-outline"
+                      onClick={() => {
+                        if (window.confirm('Discard all changes?')) {
+                          fetchStaffSettings();
+                        }
+                      }}
+                      disabled={staffSettingsLoading}
+                    >
+                      <FaTimes /> Discard Changes
+                    </button>
+                    <button 
+                      type="submit" 
+                      className={`staff-btn staff-btn-primary ${!!panError ? 'disabled' : ''}`} 
+                      disabled={staffSettingsLoading || !!panError}
+                    >
+                      <FaSave /> {staffSettingsLoading ? 'Saving Settings...' : 'Save All Settings'}
+                    </button>
+                  </div>
                 </div>
-                <div className="summary-details">
-                  <div className="summary-label">Shift Hours</div>
-                  <div className="summary-value">{staffSettings.defaultShiftHours}h</div>
-                </div>
-              </div>
-              
-              <div className="summary-item">
-                <div className="summary-icon">
-                  <FaCalculator />
-                </div>
-                <div className="summary-details">
-                  <div className="summary-label">Overtime Rate</div>
-                  <div className="summary-value">{staffSettings.overtimeRate}x</div>
-                </div>
-              </div>
+              </form>
             </div>
-          </div>
-        </div>
-        
-        <div className="staff-form-actions" style={{ 
-          display: 'flex', 
-          gap: '1rem', 
-          justifyContent: 'space-between', 
-          marginTop: '2rem',
-          flexWrap: 'wrap'
-        }}>
-          <button 
-            type="button" 
-            className="staff-btn staff-btn-secondary"
-            onClick={fetchStaffSettings}
-            disabled={staffSettingsLoading}
-          >
-            <FaSyncAlt style={{ transform: 'rotate(180deg)' }} /> Reset to Defaults
-          </button>
-          
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <button 
-              type="button" 
-              className="staff-btn staff-btn-outline"
-              onClick={() => {
-                if (window.confirm('Discard all changes?')) {
-                  fetchStaffSettings();
-                }
-              }}
-              disabled={staffSettingsLoading}
-            >
-              <FaTimes /> Discard Changes
-            </button>
-            <button 
-              type="submit" 
-              className={`staff-btn staff-btn-primary ${!!panError ? 'disabled' : ''}`} 
-              disabled={staffSettingsLoading || !!panError}
-            >
-              <FaSave /> {staffSettingsLoading ? 'Saving Settings...' : 'Save All Settings'}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
-)}
-       {activeTab !== 'dashboard' && activeTab !== 'directory' && activeTab !== 'attendance' && activeTab !== 'payroll' && activeTab !== 'settings' && activeTab !== 'performance' && (
-          <div className="staff-tab-placeholder" style={{ 
-            textAlign: 'center', 
-            padding: '4rem 2rem' 
-          }}>
-            <h2>{tabItems.find(tab => tab.id === activeTab)?.label} View</h2>
-            <p>This section would show the {activeTab} management interface.</p>
           </div>
         )}
       </div>
