@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import '../styles/TransactionForm.css'; // We'll create this CSS file
+import '../styles/TransactionForm.css';
 
 const TransactionForm = ({ transaction, suppliers, onSubmit, onCancel, loading }) => {
   const [formData, setFormData] = useState({
-    supplier: transaction?.supplier?._id || transaction?.supplier || '',
+    supplier: transaction?.supplier?.id || transaction?.supplier?._id || transaction?.supplier || '',
     type: transaction?.type || 'Payment',
     amount: transaction?.amount || '',
     paymentMode: transaction?.paymentMode || 'Cash',
@@ -17,14 +17,12 @@ const TransactionForm = ({ transaction, suppliers, onSubmit, onCancel, loading }
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    // If transaction type is Credit, disable payment mode
     if (formData.type === 'Credit') {
       setFormData(prev => ({
         ...prev,
         paymentMode: ''
       }));
     } else if (!formData.paymentMode) {
-      // Set default payment mode for non-Credit transactions
       setFormData(prev => ({
         ...prev,
         paymentMode: 'Cash'
@@ -39,7 +37,6 @@ const TransactionForm = ({ transaction, suppliers, onSubmit, onCancel, loading }
       [name]: value
     }));
     
-    // Clear error when field is updated
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
@@ -65,17 +62,15 @@ const TransactionForm = ({ transaction, suppliers, onSubmit, onCancel, loading }
   const handleSubmit = (e) => {
     e.preventDefault();
     if (validateForm()) {
-      // Convert amount to number and ensure proper date format
       const submitData = {
-        ...formData,
+        supplier: formData.supplier, // This will be the ID string
+        type: formData.type,
         amount: parseFloat(formData.amount),
-        paymentDate: new Date(formData.paymentDate).toISOString()
+        paymentDate: new Date(formData.paymentDate).toISOString(),
+        paymentMode: formData.type === 'Credit' ? undefined : formData.paymentMode,
+        referenceNumber: formData.referenceNumber,
+        description: formData.description
       };
-      
-      // For credit transactions, ensure paymentMode is empty
-      if (formData.type === 'Credit') {
-        submitData.paymentMode = '';
-      }
       
       onSubmit(submitData);
     }
@@ -95,7 +90,7 @@ const TransactionForm = ({ transaction, suppliers, onSubmit, onCancel, loading }
           >
             <option value="">Select Supplier</option>
             {suppliers.map(supplier => (
-              <option key={supplier._id} value={supplier._id}>
+              <option key={supplier.id || supplier._id} value={supplier.id || supplier._id}>
                 {supplier.name} - {supplier.companyName}
               </option>
             ))}

@@ -564,42 +564,55 @@ const StaffManagementSystem = () => {
     }
   }, [activeTab, attendanceDate]);
 
-  const fetchPayrollDataWithFilters = async () => {
-    if (!isMountedRef.current) return;
-    try {
-      setPayrollLoading(true);
-      setPayrollError(null);
+ const fetchPayrollDataWithFilters = async () => {
+  if (!isMountedRef.current) return;
+  try {
+    setPayrollLoading(true);
+    setPayrollError(null);
 
-      const params = { page: 1, limit: 1000 };
-      if (selectedYear) params.year = selectedYear;
-      if (selectedMonth) params.month = selectedMonth;
-      if (selectedStatus !== 'all') params.status = selectedStatus;
+    const params = { page: 1, limit: 1000 };
+    if (selectedYear) params.year = selectedYear;
+    if (selectedMonth) params.month = selectedMonth;
+    if (selectedStatus !== 'all') params.status = selectedStatus;
 
-      const payrollsResponse = await payrollAPI.getPayrolls(params);
+    const response = await payrollAPI.getPayrolls(params);
+    
+    console.log('Raw payroll response:', response);
+    
+    if (isMountedRef.current) {
+      // Handle different response structures
+      let payrollsArray = [];
       
-      if (isMountedRef.current) {
-        const payrollData = payrollsResponse.data || payrollsResponse;
-        
-        if (payrollData && payrollData.payrolls) {
-          setPayrolls(payrollData.payrolls || []);
-        } else if (Array.isArray(payrollData)) {
-          setPayrolls(payrollData);
-        } else {
-          setPayrolls([]);
-        }
+      if (response && response.payrolls && Array.isArray(response.payrolls)) {
+        payrollsArray = response.payrolls;
+      } else if (response && response.data && response.data.payrolls && Array.isArray(response.data.payrolls)) {
+        payrollsArray = response.data.payrolls;
+      } else if (response && response.data && Array.isArray(response.data)) {
+        payrollsArray = response.data;
+      } else if (Array.isArray(response)) {
+        payrollsArray = response;
+      } else if (response && response.success && response.payrolls) {
+        payrollsArray = response.payrolls;
+      } else {
+        console.log('No payrolls found in response, structure:', Object.keys(response || {}));
+        payrollsArray = [];
       }
-    } catch (error) {
-      console.error('Error fetching payroll data:', error);
-      if (isMountedRef.current) {
-        setPayrollError(error.response?.data?.message || error.message || `Failed to fetch payroll data`);
-        setPayrolls([]);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setPayrollLoading(false);
-      }
+      
+      console.log('Processed payrolls array:', payrollsArray);
+      setPayrolls(payrollsArray);
     }
-  };
+  } catch (error) {
+    console.error('Error fetching payroll data:', error);
+    if (isMountedRef.current) {
+      setPayrollError(error.response?.data?.message || error.message || `Failed to fetch payroll data`);
+      setPayrolls([]);
+    }
+  } finally {
+    if (isMountedRef.current) {
+      setPayrollLoading(false);
+    }
+  }
+};
 
   useEffect(() => {
     if (activeTab === 'settings') {
