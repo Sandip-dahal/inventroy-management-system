@@ -272,16 +272,15 @@ const Billing = () => {
     }
   };
 
-  // Add to cart - FIXED: Ensure product ID is preserved
-// Add to cart - FIXED: Ensure product ID is preserved
+// Add to cart - FIXED for products with 'id' field
 const addToCart = (product) => {
   if (product.stock <= 0) {
     setError('Product is out of stock');
     return;
   }
   
-  // Ensure we have both id and _id
-  const productId = product._id || product.id;
+  // Use 'id' field (not '_id')
+  const productId = product.id;
   if (!productId) {
     console.error('Product missing ID:', product);
     setError('Invalid product: missing ID');
@@ -290,18 +289,14 @@ const addToCart = (product) => {
   
   console.log('Adding product to cart:', { id: productId, name: product.name });
   
-  // If pricing mode is variable, allow price editing
   const cartItem = {
     ...product,
-    _id: productId,  // Ensure _id is set
-    id: productId,   // Ensure id is set
+    _id: productId,  // Set _id to the same value for compatibility
+    id: productId,
     quantity: 1,
     discount: 0,
-    // Store the original price separately for reference
     originalPrice: product.price,
-    // Allow price editing only in variable mode
     editablePrice: pricingMode === 'variable',
-    // Add remarks field if price is 0
     remarks: product.price === 0 ? '' : undefined
   };
   
@@ -323,7 +318,6 @@ const addToCart = (product) => {
     setCart([...cart, cartItem]);
   }
   
-  // Validate cart after adding item
   setTimeout(() => validateCart(), 0);
 };
 
@@ -432,7 +426,7 @@ const handlePaymentConfirm = async (payment) => {
   }
 };
 
-  // Save bill to Firebase and update stock - FIXED: Handle product ID correctly
+// Save bill to Firebase and update stock - FIXED for products with 'id' field
 const saveBill = async () => {
   try {
     setLoading(true);
@@ -441,13 +435,14 @@ const saveBill = async () => {
     const billData = {
       ...currentBill,
       items: currentBill.items.map(item => {
-        const productId = item._id || item.id;
+        // Use 'id' field (not '_id')
+        const productId = item.id;
         console.log('Processing bill item:', { name: item.name, productId: productId });
         
         return {
           ...item,
-          productId: productId, // Ensure productId is included
-          stockAtTimeOfSale: item.stock // Capture stock at time of sale
+          productId: productId,
+          stockAtTimeOfSale: item.stock
         };
       })
     };
@@ -465,7 +460,7 @@ const saveBill = async () => {
     if (response && response.success) {
       // Update product stock in database
       const updatePromises = currentBill.items.map(item => {
-        const productId = item._id || item.id;
+        const productId = item.id; // Use 'id' field
         if (!productId) {
           console.error('No product ID found for item:', item);
           return Promise.resolve();
@@ -489,7 +484,6 @@ const saveBill = async () => {
       
       setLoading(false);
       
-      // Show success message
       alert('Bill saved successfully! Stock updated.');
     } else {
       throw new Error('Failed to save bill to database');
@@ -1021,9 +1015,9 @@ const saveBill = async () => {
                 <p>Try a different search term or check your inventory</p>
               </div>
             ) : (
-             filteredProducts.map(product => (
+    filteredProducts.map(product => (
   <div 
-    key={product._id || product.id}  // Use both _id and id
+    key={product.id}  // Use 'id' instead of '_id'
     className={`product-card ${product.stock <= 0 ? 'out-of-stock' : ''} ${product.stock <= (product.lowStockAlert || 5) ? 'low-stock' : ''}`}
     onClick={() => product.stock > 0 && addToCart(product)}
   >
