@@ -272,36 +272,50 @@ const Billing = () => {
     }
   };
 
-// Add to cart - FIXED for products with 'id' field
+// Add to cart - FIXED: Use the correct ID field
 const addToCart = (product) => {
   if (product.stock <= 0) {
     setError('Product is out of stock');
     return;
   }
   
-  // Use 'id' field (not '_id')
-  const productId = product.id;
+  // IMPORTANT: Use the document ID (id or _id), NOT the productId field
+  const productId = product.id || product._id;
+  
   if (!productId) {
-    console.error('Product missing ID:', product);
+    console.error('Product missing document ID:', product);
     setError('Invalid product: missing ID');
     return;
   }
   
-  console.log('Adding product to cart:', { id: productId, name: product.name });
+  console.log('Adding product to cart:', { 
+    documentId: productId,
+    sku: product.productId,
+    name: product.name,
+    price: product.price,
+    stock: product.stock
+  });
   
   const cartItem = {
-    ...product,
-    _id: productId,  // Set _id to the same value for compatibility
-    id: productId,
+    id: productId,           // Store the document ID
+    _id: productId,          // Also store for compatibility
+    name: product.name,
+    price: product.price,
+    stock: product.stock,
     quantity: 1,
     discount: 0,
+    size: product.size,
+    color: product.color,
+    sku: product.sku,
+    barcode: product.barcode,
+    category: product.category,
     originalPrice: product.price,
     editablePrice: pricingMode === 'variable',
     remarks: product.price === 0 ? '' : undefined
   };
   
   const existingItemIndex = cart.findIndex(item => 
-    (item._id === productId || item.id === productId) && 
+    (item.id === productId || item._id === productId) && 
     item.size === product.size && 
     item.color === product.color
   );
@@ -426,55 +440,55 @@ const handlePaymentConfirm = async (payment) => {
   }
 };
 
-// Save bill to Firebase and update stock - FIXED for products with 'id' field
+// Save bill - FIXED: Use document ID for stock update
 const saveBill = async () => {
   try {
     setLoading(true);
     
-    // Prepare bill data with all required fields
+    if (!currentBill || !currentBill.items) {
+      setError('No bill data found');
+      setLoading(false);
+      return;
+    }
+    
+    // Prepare bill data
     const billData = {
       ...currentBill,
       items: currentBill.items.map(item => {
-        // Use 'id' field (not '_id')
-        const productId = item.id;
-        console.log('Processing bill item:', { name: item.name, productId: productId });
+        // Get the document ID (not the productId/SKU)
+        const documentId = item.id || item._id;
+        console.log(`Item: ${item.name}, Document ID: ${documentId}, SKU: ${item.productId}`);
         
         return {
           ...item,
-          productId: productId,
+          productId: documentId,  // Store the document ID as productId for the bill
           stockAtTimeOfSale: item.stock
         };
       })
     };
     
-    console.log('Saving bill with items:', billData.items.map(i => ({ 
-      id: i.productId, 
-      name: i.name,
-      stock: i.stock,
-      quantity: i.quantity
-    })));
-    
     // Save bill to database
     const response = await billingAPI.createBill(billData);
     
     if (response && response.success) {
-      // Update product stock in database
-      const updatePromises = currentBill.items.map(item => {
-        const productId = item.id; // Use 'id' field
-        if (!productId) {
-          console.error('No product ID found for item:', item);
+      console.log('Bill saved, updating stock...');
+      
+      // Update product stock using the document ID
+      const updatePromises = billData.items.map(item => {
+        const documentId = item.id || item._id;
+        if (!documentId) {
+          console.error('No document ID for item:', item.name);
           return Promise.resolve();
         }
+        
         const newStock = item.stock - item.quantity;
-        console.log(`Updating product ${productId} stock from ${item.stock} to ${newStock}`);
-        return inventoryAPI.updateProduct(productId, { 
-          stock: newStock 
-        });
+        console.log(`Updating product ${documentId} (${item.name}) stock to ${newStock}`);
+        return inventoryAPI.updateProduct(documentId, { stock: newStock });
       });
       
       await Promise.all(updatePromises);
       
-      // Reset cart and close modal
+      // Reset everything
       setCart([]);
       setCustomer(null);
       setDiscountType('none');
@@ -483,10 +497,9 @@ const saveBill = async () => {
       setCartErrors({});
       
       setLoading(false);
-      
       alert('Bill saved successfully! Stock updated.');
     } else {
-      throw new Error('Failed to save bill to database');
+      throw new Error('Failed to save bill');
     }
     
   } catch (error) {
