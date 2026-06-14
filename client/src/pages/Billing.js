@@ -272,43 +272,30 @@ const Billing = () => {
     }
   };
 
-// Add to cart - FIXED: Use the correct ID field
+// Add to cart - COMPLETE FIX
 const addToCart = (product) => {
   if (product.stock <= 0) {
     setError('Product is out of stock');
     return;
   }
   
-  // IMPORTANT: Use the document ID (id or _id), NOT the productId field
-  const productId = product.id || product._id;
+  // IMPORTANT: Use the 'id' field from the product
+  const productId = product.id;
   
   if (!productId) {
-    console.error('Product missing document ID:', product);
+    console.error('Product missing ID:', product);
     setError('Invalid product: missing ID');
     return;
   }
   
-  console.log('Adding product to cart:', { 
-    documentId: productId,
-    sku: product.productId,
-    name: product.name,
-    price: product.price,
-    stock: product.stock
-  });
+  console.log('Adding to cart - Product ID:', productId, 'Name:', product.name);
   
   const cartItem = {
-    id: productId,           // Store the document ID
-    _id: productId,          // Also store for compatibility
-    name: product.name,
-    price: product.price,
-    stock: product.stock,
+    ...product,
+    id: productId,        // Keep the id
+    _id: productId,       // Also set _id for compatibility
     quantity: 1,
     discount: 0,
-    size: product.size,
-    color: product.color,
-    sku: product.sku,
-    barcode: product.barcode,
-    category: product.category,
     originalPrice: product.price,
     editablePrice: pricingMode === 'variable',
     remarks: product.price === 0 ? '' : undefined
@@ -393,9 +380,7 @@ const addToCart = (product) => {
   };
 
 // Handle payment confirmation from modal
-// Handle payment confirmation from modal
 const handlePaymentConfirm = async (payment) => {
-  // Validate cart before proceeding
   if (!validateCart()) {
     setError('Please fill in all required remarks for free items');
     return;
@@ -404,14 +389,14 @@ const handlePaymentConfirm = async (payment) => {
   try {
     setLoading(true);
     
-    // Create bill data
     const billNumber = await getNextBillNumber();
     const nepaliDate = getNepaliDate();
     
+    // Use the cart directly
     const billData = {
       billNumber,
       nepaliDate,
-      items: cart,
+      items: cart,  // Pass cart directly
       customer,
       subtotal,
       discount: discountAmount,
@@ -424,8 +409,10 @@ const handlePaymentConfirm = async (payment) => {
       vatRate: vatRegistered ? vatRate : 0,
       vatEnabled: vatRegistered,
       qrCodeContent,
-      qrCodeImage: '' // No need for image URL, we use SVG
+      qrCodeImage: ''
     };
+    
+    console.log('Bill data created with items:', billData.items.map(i => ({ name: i.name, id: i.id })));
     
     setCurrentBill(billData);
     setIsReceiptModalOpen(true);
@@ -440,32 +427,32 @@ const handlePaymentConfirm = async (payment) => {
   }
 };
 
-// Save bill - FIXED: Use document ID for stock update
+// Save bill - FIXED VERSION
 const saveBill = async () => {
   try {
     setLoading(true);
     
-    if (!currentBill || !currentBill.items) {
+    console.log('=== SAVING BILL ===');
+    console.log('Cart items before save:', cart.map(item => ({ name: item.name, id: item.id, stock: item.stock, quantity: item.quantity })));
+    
+    if (!currentBill) {
+      console.error('No current bill');
       setError('No bill data found');
       setLoading(false);
       return;
     }
     
-    // Prepare bill data
+    // Prepare bill data - use the cart items directly
     const billData = {
       ...currentBill,
-      items: currentBill.items.map(item => {
-        // Get the document ID (not the productId/SKU)
-        const documentId = item.id || item._id;
-        console.log(`Item: ${item.name}, Document ID: ${documentId}, SKU: ${item.productId}`);
-        
-        return {
-          ...item,
-          productId: documentId,  // Store the document ID as productId for the bill
-          stockAtTimeOfSale: item.stock
-        };
-      })
+      items: cart.map(item => ({
+        ...item,
+        productId: item.id,  // Use the id field
+        stockAtTimeOfSale: item.stock
+      }))
     };
+    
+    console.log('Bill data items:', billData.items.map(i => ({ name: i.name, productId: i.productId })));
     
     // Save bill to database
     const response = await billingAPI.createBill(billData);
@@ -473,20 +460,20 @@ const saveBill = async () => {
     if (response && response.success) {
       console.log('Bill saved, updating stock...');
       
-      // Update product stock using the document ID
-      const updatePromises = billData.items.map(item => {
-        const documentId = item.id || item._id;
-        if (!documentId) {
-          console.error('No document ID for item:', item.name);
+      // Update product stock
+      const updatePromises = cart.map(item => {
+        const productId = item.id;
+        if (!productId) {
+          console.error('No ID for item:', item.name);
           return Promise.resolve();
         }
-        
         const newStock = item.stock - item.quantity;
-        console.log(`Updating product ${documentId} (${item.name}) stock to ${newStock}`);
-        return inventoryAPI.updateProduct(documentId, { stock: newStock });
+        console.log(`Updating ${item.name} (${productId}) stock to ${newStock}`);
+        return inventoryAPI.updateProduct(productId, { stock: newStock });
       });
       
       await Promise.all(updatePromises);
+      console.log('All stock updates completed');
       
       // Reset everything
       setCart([]);
