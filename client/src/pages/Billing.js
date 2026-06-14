@@ -273,55 +273,59 @@ const Billing = () => {
   };
 
   // Add to cart - FIXED: Ensure product ID is preserved
-  const addToCart = (product) => {
-    if (product.stock <= 0) {
-      setError('Product is out of stock');
-      return;
-    }
-    
-    // Ensure we have both id and _id
-    const productId = product._id || product.id;
-    if (!productId) {
-      setError('Invalid product: missing ID');
-      return;
-    }
-    
-    // If pricing mode is variable, allow price editing
-    const cartItem = {
-      ...product,
-      _id: productId,  // Ensure _id is set
-      id: productId,   // Ensure id is set
-      quantity: 1,
-      discount: 0,
-      // Store the original price separately for reference
-      originalPrice: product.price,
-      // Allow price editing only in variable mode
-      editablePrice: pricingMode === 'variable',
-      // Add remarks field if price is 0
-      remarks: product.price === 0 ? '' : undefined
-    };
-    
-    const existingItemIndex = cart.findIndex(item => 
-      (item._id === productId || item.id === productId) && 
-      item.size === product.size && 
-      item.color === product.color
-    );
-    
-    if (existingItemIndex >= 0) {
-      const updatedCart = [...cart];
-      if (updatedCart[existingItemIndex].quantity < product.stock) {
-        updatedCart[existingItemIndex].quantity += 1;
-        setCart(updatedCart);
-      } else {
-        setError('Not enough stock available');
-      }
-    } else {
-      setCart([...cart, cartItem]);
-    }
-    
-    // Validate cart after adding item
-    setTimeout(() => validateCart(), 0);
+// Add to cart - FIXED: Ensure product ID is preserved
+const addToCart = (product) => {
+  if (product.stock <= 0) {
+    setError('Product is out of stock');
+    return;
+  }
+  
+  // Ensure we have both id and _id
+  const productId = product._id || product.id;
+  if (!productId) {
+    console.error('Product missing ID:', product);
+    setError('Invalid product: missing ID');
+    return;
+  }
+  
+  console.log('Adding product to cart:', { id: productId, name: product.name });
+  
+  // If pricing mode is variable, allow price editing
+  const cartItem = {
+    ...product,
+    _id: productId,  // Ensure _id is set
+    id: productId,   // Ensure id is set
+    quantity: 1,
+    discount: 0,
+    // Store the original price separately for reference
+    originalPrice: product.price,
+    // Allow price editing only in variable mode
+    editablePrice: pricingMode === 'variable',
+    // Add remarks field if price is 0
+    remarks: product.price === 0 ? '' : undefined
   };
+  
+  const existingItemIndex = cart.findIndex(item => 
+    (item._id === productId || item.id === productId) && 
+    item.size === product.size && 
+    item.color === product.color
+  );
+  
+  if (existingItemIndex >= 0) {
+    const updatedCart = [...cart];
+    if (updatedCart[existingItemIndex].quantity < product.stock) {
+      updatedCart[existingItemIndex].quantity += 1;
+      setCart(updatedCart);
+    } else {
+      setError('Not enough stock available');
+    }
+  } else {
+    setCart([...cart, cartItem]);
+  }
+  
+  // Validate cart after adding item
+  setTimeout(() => validateCart(), 0);
+};
 
   // Update quantity
   const updateQuantity = (index, newQuantity) => {
@@ -429,69 +433,74 @@ const handlePaymentConfirm = async (payment) => {
 };
 
   // Save bill to Firebase and update stock - FIXED: Handle product ID correctly
-  const saveBill = async () => {
-    try {
-      setLoading(true);
-      
-      // Prepare bill data with all required fields
-      const billData = {
-        ...currentBill,
-        items: currentBill.items.map(item => ({
+const saveBill = async () => {
+  try {
+    setLoading(true);
+    
+    // Prepare bill data with all required fields
+    const billData = {
+      ...currentBill,
+      items: currentBill.items.map(item => {
+        const productId = item._id || item.id;
+        console.log('Processing bill item:', { name: item.name, productId: productId });
+        
+        return {
           ...item,
-          productId: item._id || item.id, // Check both _id and id
+          productId: productId, // Ensure productId is included
           stockAtTimeOfSale: item.stock // Capture stock at time of sale
-        }))
-      };
-      
-      console.log('Saving bill with items:', billData.items.map(i => ({ 
-        id: i.productId, 
-        name: i.name,
-        stock: i.stock,
-        quantity: i.quantity
-      })));
-      
-      // Save bill to database
-      const response = await billingAPI.createBill(billData);
-      
-      if (response && response.success) {
-        // Update product stock in database
-        const updatePromises = currentBill.items.map(item => {
-          const productId = item._id || item.id;
-          if (!productId) {
-            console.error('No product ID found for item:', item);
-            return Promise.resolve();
-          }
-          const newStock = item.stock - item.quantity;
-          console.log(`Updating product ${productId} stock from ${item.stock} to ${newStock}`);
-          return inventoryAPI.updateProduct(productId, { 
-            stock: newStock 
-          });
+        };
+      })
+    };
+    
+    console.log('Saving bill with items:', billData.items.map(i => ({ 
+      id: i.productId, 
+      name: i.name,
+      stock: i.stock,
+      quantity: i.quantity
+    })));
+    
+    // Save bill to database
+    const response = await billingAPI.createBill(billData);
+    
+    if (response && response.success) {
+      // Update product stock in database
+      const updatePromises = currentBill.items.map(item => {
+        const productId = item._id || item.id;
+        if (!productId) {
+          console.error('No product ID found for item:', item);
+          return Promise.resolve();
+        }
+        const newStock = item.stock - item.quantity;
+        console.log(`Updating product ${productId} stock from ${item.stock} to ${newStock}`);
+        return inventoryAPI.updateProduct(productId, { 
+          stock: newStock 
         });
-        
-        await Promise.all(updatePromises);
-        
-        // Reset cart and close modal
-        setCart([]);
-        setCustomer(null);
-        setDiscountType('none');
-        setDiscountValue(0);
-        setIsReceiptModalOpen(false);
-        setCartErrors({});
-        
-        setLoading(false);
-        
-        // Show success message
-        alert('Bill saved successfully! Stock updated.');
-      } else {
-        throw new Error('Failed to save bill to database');
-      }
+      });
       
-    } catch (error) {
-      console.error('Error saving bill:', error);
-      setError('Failed to save bill. Please try again.');
+      await Promise.all(updatePromises);
+      
+      // Reset cart and close modal
+      setCart([]);
+      setCustomer(null);
+      setDiscountType('none');
+      setDiscountValue(0);
+      setIsReceiptModalOpen(false);
+      setCartErrors({});
+      
       setLoading(false);
+      
+      // Show success message
+      alert('Bill saved successfully! Stock updated.');
+    } else {
+      throw new Error('Failed to save bill to database');
     }
-  };
+    
+  } catch (error) {
+    console.error('Error saving bill:', error);
+    setError('Failed to save bill. Please try again.');
+    setLoading(false);
+  }
+};
 
   // Print bill function
   const printBill = () => {
@@ -1012,12 +1021,12 @@ const handlePaymentConfirm = async (payment) => {
                 <p>Try a different search term or check your inventory</p>
               </div>
             ) : (
-              filteredProducts.map(product => (
-                <div 
-                  key={product._id || product.id} 
-                  className={`product-card ${product.stock <= 0 ? 'out-of-stock' : ''} ${product.stock <= (product.lowStockAlert || 5) ? 'low-stock' : ''}`}
-                  onClick={() => product.stock > 0 && addToCart(product)}
-                >
+             filteredProducts.map(product => (
+  <div 
+    key={product._id || product.id}  // Use both _id and id
+    className={`product-card ${product.stock <= 0 ? 'out-of-stock' : ''} ${product.stock <= (product.lowStockAlert || 5) ? 'low-stock' : ''}`}
+    onClick={() => product.stock > 0 && addToCart(product)}
+  >
                   <div className="product-image">
                     {product.image ? (
                       <img src={product.image} alt={product.name} />
