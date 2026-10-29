@@ -1,6 +1,6 @@
-Final year project
+(Final year project)
 Team Member:
-Aditya Pokhrel
-Sandip Dahal
-Sushanta Ijam
-Shivam Karn
+Aditya Pokhrel,
+Sandip Dahal,
+Sushanta Ijam,
+Shivam Karn,
